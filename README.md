@@ -69,3 +69,9 @@ bash install.sh
 
 删除 `settings.json` 里的 `statusLine` 键（或用安装前的
 `settings.json.bak` 恢复），再删掉 `~/.claude/` 下三个脚本即可。
+
+## claude-config/ — 用户配置备份
+
+[`claude-config/`](claude-config/) 是 `~/.claude/` 用户级配置的打包备份
+（全局 CLAUDE.md、settings、MCP 服务器、自定义 skills），密钥已替换为
+占位符，详见其目录内 README。

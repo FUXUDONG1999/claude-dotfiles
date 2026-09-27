@@ -1,0 +1,94 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_ZHIPU_API_KEY",
+    "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.3-flash",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.3",
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_EFFORT_LEVEL": "xhigh",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32768",
+    "CLAUDE_CODE_SCROLL_SPEED": "3",
+    "CLAUDE_CODE_NATIVE_CURSOR": "1"
+  },
+  "permissions": {
+    "allow": [
+      "mcp__zai-mcp-server",
+      "mcp__web-search-prime",
+      "mcp__web-reader",
+      "mcp__zread",
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "WebFetch",
+      "WebSearch",
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(pnpm:*)",
+      "Bash(yarn:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip:*)",
+      "Bash(make:*)",
+      "Bash(cargo:*)",
+      "Bash(go:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(wc:*)",
+      "Bash(which:*)",
+      "Bash(pwd)",
+      "Bash(echo:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": [
+      "Bash(sudo:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/credentials*)",
+      "Read(**/*id_rsa*)",
+      "Read(**/*.pem)"
+    ],
+    "defaultMode": "auto"
+  },
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": true
+  },
+  "extraKnownMarketplaces": {
+    "superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
+      }
+    },
+    "xyzbit-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "xyzbit/claude-plugins"
+      }
+    },
+    "claude-community": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-community"
+      }
+    }
+  },
+  "theme": "dark-daltonized",
+  "autoCompactEnabled": true,
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline.sh"
+  }
+}
