@@ -46,13 +46,15 @@ details { border: 1px solid var(--border); border-radius: 8px; padding: 10px 16p
 summary { cursor: pointer; font-weight: 600; color: var(--accent); font-size: 16px; }
 details[open] { padding-bottom: 16px; }
 details p { margin-top: 10px; color: var(--text-secondary); font-size: 16px; }
-mjx-container[jax="CHTML"][display="true"] { margin: 10px 0 !important; line-height: 1.2 !important; }
+mjx-container[jax="CHTML"][display="true"] { margin: 10px 0 !important; line-height: 1.2 !important; overflow-x: auto; overflow-y: hidden; max-width: 100%; }
 mjx-container[jax="CHTML"] { line-height: 1.2 !important; }
 .svg-container { text-align: center; margin: 14px 0; }
 .svg-container svg { max-width: 100%; }
 .highlight { background: linear-gradient(120deg, rgba(243,156,18,0.2) 0%, rgba(243,156,18,0.05) 100%); padding: 2px 4px; border-radius: 3px; font-weight: 600; }
 .footer { text-align: center; color: var(--text-secondary); font-size: 14px; margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--border); }
-@media (max-width: 900px) { .main { padding: 18px 0; } .chapter { padding: 0 18px; } table { display: block; overflow-x: auto; } }
+/* MathJax 长公式窄屏修复：display 公式就地横向滚动（MathJax 3 不自动断行）；
+   章节作滚动容器兜底超长行内公式（不能对行内 mjx-container 加 overflow——inline-block 基线会变底边，公式会上浮错位） */
+@media (max-width: 900px) { .main { padding: 18px 0; } .chapter { padding: 0 18px; overflow-x: auto; } table { display: block; overflow-x: auto; } }
 
 /* ===== 目录页（index.html）补充样式：课件页面不使用，改样式不受模板约束 ===== */
 /* ===== 目录页（index.html）：左目录树 + 右侧阅读区（iframe），课件页面不使用 ===== */
