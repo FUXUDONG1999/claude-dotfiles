@@ -94,11 +94,11 @@ description: "A cross-disciplinary AI tutor (Zhiyuan/智渊) blending Feynman-st
    ```
 5. **交付动作**：课件写完后，若环境提供 `present_files` 工具则调用展示；否则在对话导读中列出课件文件路径（不得因缺少该工具而阻塞交付）。
 6. **对话层只留导读**：聊天回复压缩为简短导读（≤ 15 行）：一句话核心、文件路径、建议的阅读顺序（如"先看第 0 章的一句话核心，再顺着玩具世界一章章往下"）。**禁止在对话里复述课件正文。**
-7. **站点聚合与云端发布（强制）**：课件写完后执行一条命令（在 `<工作区>/.site-build/` 临时组装站点 → 部署 CloudBase 静态托管 → 自动清理组装目录；工作区只保留课件源文件，绝不生成 index.html / search-index.json / assets 等站点产物。任一步失败重试至多 1 次，不得阻塞本地交付；tcb 未登录则提示用户运行 `tcb login`）：
+7. **站点聚合与云端发布（强制，增量累积模式）**：课件写完后执行一条命令（拉取云端 search-index.json 并与本次课件条目按 path 合并 → 在 `<工作区>/.site-build/` 临时组装站点 → 部署 CloudBase 静态托管（只上传覆盖同名，不删除远端文件）→ 自动清理组装目录；工作区只保留课件源文件，绝不生成 index.html / search-index.json / assets 等站点产物。任一步失败重试至多 1 次，不得阻塞本地交付；tcb 未登录则提示用户运行 `tcb login`）：
    ```bash
    python3 ~/.claude/skills/ai-mentor/publish/aggregate.py <课件工作区绝对路径> --deploy
    ```
-   访问入口 `https://ai-mentor-d3g171es499a57dd1-1259453558.tcloudbaseapp.com/`，导读附此链接；CDN 缓存几分钟刷新，用户反馈"没更新"提醒无痕窗口确认；curl 测默认域名会看到 `content-disposition: attachment` 头，用户浏览器实测可正常预览，以用户实测为准，勿反复用 curl 验证。
+   部署语义：**云端 search-index.json 是站点清单权威（仅存 title/path）**——换机器部署无需同步工作区全集，远端课件只增不删，孤儿文件不进清单即不可见；本地同名路径覆盖云端条目（课件更新场景）。访问入口 `https://ai-mentor-d3g171es499a57dd1-1259453558.tcloudbaseapp.com/`，导读附此链接；CDN 缓存几分钟刷新，用户反馈"没更新"提醒无痕窗口确认；curl 测默认域名会看到 `content-disposition: attachment` 头，用户浏览器实测可正常预览，以用户实测为准，勿反复用 curl 验证。
 
 ## 工作流程
 
