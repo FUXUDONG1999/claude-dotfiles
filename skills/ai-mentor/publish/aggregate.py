@@ -13,6 +13,7 @@
 用法：
     python3 aggregate.py <课件工作区>              # 仅组装（仍拉取远端索引合并），保留 .site-build/ 供本地检查
     python3 aggregate.py <课件工作区> --deploy     # 组装 + 部署 + 清理（SKILL.md 标准流程）
+    python3 aggregate.py <任意目录> --site-only [--deploy]  # 仅按云端清单更新站点外壳（index.html/search-index.json/assets），不扫描、不上传课件
 """
 
 import argparse
@@ -47,8 +48,10 @@ INDEX_PAGE_TEMPLATE = '''<!DOCTYPE html>
 <link rel="stylesheet" href="assets/courseware.css">
 </head>
 <body>
+<button id="nav-toggle" class="nav-toggle" aria-label="打开目录" aria-expanded="false">☰</button>
 <div class="docs-layout">
   <nav class="docs-nav">
+    <button id="nav-close" class="nav-close" aria-label="收起目录">✕</button>
     <h1>📚 知识课件库</h1>
     <input id="site-search-input" class="site-search-input" placeholder="正在加载搜索索引…" autocomplete="off" disabled>
     <div id="search-result-container" hidden></div>
@@ -58,6 +61,7 @@ INDEX_PAGE_TEMPLATE = '''<!DOCTYPE html>
   </nav>
   <iframe id="content-frame" class="docs-frame" title="课件内容"></iframe>
 </div>
+<div id="nav-backdrop" class="nav-backdrop"></div>
 <script src="assets/site.js"></script>
 </body>
 </html>
@@ -196,14 +200,15 @@ def render_group_sections(catalog_entries: list) -> str:
     return '\n'.join(group_sections)
 
 
-def assemble_site(workspace_root: Path, catalog_entries: list) -> Path:
-    """组装完整站点到 <工作区>/.site-build/，返回组装目录。"""
+def assemble_site(workspace_root: Path, catalog_entries: list, include_courseware: bool = True) -> Path:
+    """组装完整站点到 <工作区>/.site-build/，返回组装目录；include_courseware=False 时只组装站点外壳。"""
     build_root = workspace_root / BUILD_DIRECTORY_NAME
     if build_root.exists():
         shutil.rmtree(build_root)
     build_root.mkdir(parents=True)
 
-    copy_courseware_sources(workspace_root, build_root)
+    if include_courseware:
+        copy_courseware_sources(workspace_root, build_root)
     shutil.copytree(SHARED_ASSETS_SOURCE, build_root / 'assets')
 
     group_count = len({derive_group_name(catalog_entry['path']) for catalog_entry in catalog_entries})
@@ -228,6 +233,7 @@ def main() -> None:
     argument_parser = argparse.ArgumentParser(description='课件站点聚合部署器（临时组装、部署即焚）')
     argument_parser.add_argument('workspace', help='课件工作区目录（<主题>/ 文件夹所在目录）')
     argument_parser.add_argument('--deploy', action='store_true', help='部署到 CloudBase 并清理组装目录')
+    argument_parser.add_argument('--site-only', action='store_true', help='仅按云端清单更新站点外壳（index.html/search-index.json/assets），不扫描、不上传课件')
     argument_parser.add_argument('--env-id', default=DEFAULT_ENV_ID, help=f'CloudBase 环境 ID（默认 {DEFAULT_ENV_ID}）')
     parsed_arguments = argument_parser.parse_args()
 
@@ -235,15 +241,19 @@ def main() -> None:
     if not workspace_root.is_dir():
         raise SystemExit(f'课件工作区不存在：{workspace_root}')
 
-    local_entries = collect_local_catalog_entries(workspace_root)
-    if not local_entries:
-        raise SystemExit(f'未在 {workspace_root} 找到课件 HTML')
+    if parsed_arguments.site_only:
+        print('仅更新站点外壳模式：跳过本地课件扫描，清单以云端为准。')
+        local_entries = []
+    else:
+        local_entries = collect_local_catalog_entries(workspace_root)
+        if not local_entries:
+            raise SystemExit(f'未在 {workspace_root} 找到课件 HTML（只更新站点外壳请改用 --site-only）')
 
     remote_entries = fetch_remote_catalog_entries(parsed_arguments.env_id)
     catalog_entries = merge_catalog_entries(remote_entries, local_entries)
     print(f'清单合并：云端 {len(remote_entries)} 条 + 本地 {len(local_entries)} 条 → {len(catalog_entries)} 条（同名路径本地覆盖）。')
 
-    build_root = assemble_site(workspace_root, catalog_entries)
+    build_root = assemble_site(workspace_root, catalog_entries, include_courseware=not parsed_arguments.site_only)
 
     if parsed_arguments.deploy:
         deploy_site(build_root, parsed_arguments.env_id)

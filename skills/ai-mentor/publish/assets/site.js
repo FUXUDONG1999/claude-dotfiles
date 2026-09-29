@@ -1,11 +1,15 @@
 // 课件站交互：左侧目录树点选文档、右侧 iframe 阅读（不跳页）、顶部标题检索。
 // 中文检索按子串匹配（天然等价分词），全部计算在浏览器端完成。
 // 索引仅含 title/path（增量累积部署，清单以云端 search-index.json 为权威），故检索只匹配标题。
+// 移动端（≤900px）：目录为滑出抽屉，☰ 呼出，遮罩/✕/选中课件后收起（body.nav-open 仅在小屏媒体查询内生效）。
 (function () {
   var contentFrame = document.getElementById('content-frame');
   var docsTree = document.getElementById('docs-tree');
   var searchInput = document.getElementById('site-search-input');
   var searchResultContainer = document.getElementById('search-result-container');
+  var navToggleButton = document.getElementById('nav-toggle');
+  var navCloseButton = document.getElementById('nav-close');
+  var navBackdrop = document.getElementById('nav-backdrop');
   if (!contentFrame || !docsTree) return;
 
   var searchIndex = [];
@@ -28,10 +32,16 @@
     });
   }
 
+  function setNavOpen(isOpen) {
+    document.body.classList.toggle('nav-open', isOpen);
+    if (navToggleButton) navToggleButton.setAttribute('aria-expanded', String(isOpen));
+  }
+
   function openDocument(path) {
     contentFrame.src = path;
     setActiveLink(path);
     history.replaceState(null, '', '#' + path);
+    setNavOpen(false);
   }
 
   docsTree.addEventListener('click', function (event) {
@@ -40,6 +50,18 @@
     event.preventDefault();
     openDocument(link.getAttribute('data-path'));
   });
+
+  if (navToggleButton) {
+    navToggleButton.addEventListener('click', function () {
+      setNavOpen(!document.body.classList.contains('nav-open'));
+    });
+  }
+  if (navCloseButton) {
+    navCloseButton.addEventListener('click', function () { setNavOpen(false); });
+  }
+  if (navBackdrop) {
+    navBackdrop.addEventListener('click', function () { setNavOpen(false); });
+  }
 
   searchResultContainer.addEventListener('click', function (event) {
     var link = event.target.closest('a[data-path]');
