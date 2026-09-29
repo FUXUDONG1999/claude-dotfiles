@@ -60,6 +60,7 @@ mjx-container[jax="CHTML"] { line-height: 1.2 !important; }
 .docs-nav { width: 300px; min-width: 240px; box-sizing: border-box; padding: 18px 14px; overflow-y: auto; background: var(--card); border-right: 1px solid var(--border); }
 .docs-nav h1 { font-size: 20px; color: var(--accent); margin: 0 0 14px; }
 .docs-group { margin-bottom: 18px; }
+.docs-group + .docs-group { border-top: 1px solid var(--border); padding-top: 14px; }
 .docs-group h2 { font-size: 14.5px; color: var(--text-secondary); font-weight: 600; margin: 0 0 4px; padding: 4px 8px; }
 .docs-group h2 .docs-path { font-size: 12px; font-weight: normal; }
 .docs-list { list-style: none; margin: 0; padding: 0; }

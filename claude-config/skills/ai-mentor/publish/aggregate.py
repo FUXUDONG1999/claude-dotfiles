@@ -64,6 +64,14 @@ INDEX_GROUP_TEMPLATE = '''      <section class="docs-group">
         </ul>
       </section>'''
 
+TOP_LEVEL_GROUP_TEMPLATE = '''      <section class="docs-group">
+        <ul class="docs-list">
+{index_entries}
+        </ul>
+      </section>'''
+
+TOP_LEVEL_GROUP_NAME = '顶层'
+
 INDEX_ENTRY_TEMPLATE = '          <li><a href="{path}" data-path="{path}">{title}</a></li>'
 
 
@@ -113,21 +121,30 @@ def copy_courseware_sources(workspace_root: Path, build_root: Path) -> None:
 
 
 def render_group_sections(catalog_entries: list) -> str:
-    """按目录分组渲染目录页的各分组区块。"""
+    """按目录分组渲染目录树：顶层课件不显示分组标题，其余分组按路径排序、组间横线分隔。"""
     grouped_entries = {}
     for catalog_entry in catalog_entries:
         grouped_entries.setdefault(catalog_entry['group'], []).append(catalog_entry)
 
+    ordered_group_names = sorted(grouped_entries)
+    if TOP_LEVEL_GROUP_NAME in grouped_entries:
+        ordered_group_names.remove(TOP_LEVEL_GROUP_NAME)
+        ordered_group_names.insert(0, TOP_LEVEL_GROUP_NAME)
+
     group_sections = []
-    for group_name in sorted(grouped_entries):
+    for group_name in ordered_group_names:
         index_entries = '\n'.join(
             INDEX_ENTRY_TEMPLATE.format(
                 path=catalog_entry['path'],
                 title=catalog_entry['title'],
-                date=catalog_entry['date'],
             )
             for catalog_entry in grouped_entries[group_name]
         )
+
+        if group_name == TOP_LEVEL_GROUP_NAME:
+            group_sections.append(TOP_LEVEL_GROUP_TEMPLATE.format(index_entries=index_entries))
+            continue
+
         group_path_parts = group_name.split('/')
         group_sections.append(INDEX_GROUP_TEMPLATE.format(
             group_name=group_path_parts[-1],
