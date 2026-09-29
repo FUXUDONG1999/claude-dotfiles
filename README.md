@@ -1,77 +1,59 @@
-# Claude Code Statusline（GLM Coding Plan 额度版）
+# claude-dotfiles
 
-一行状态栏，同时显示模型 / 上下文进度条 / 目录 / git 分支，右侧贴边显示
-GLM Coding Plan 的 5 小时与周额度进度条：
+`~/.claude` 用户配置与自研工具的**分类备份仓库**（快照，非开发主库）。
+skills 等内容的日常开发在 `~/.claude/` 进行，本仓库定期同步打包，
+密钥均已脱敏为占位符。
 
-```
-glm-5.3 | ctx ████░░░░░░ 43% | 项目目录 ⣿ git分支        ⚡ ██░░░░░░░░ 8%(13:56) | 周 █████░░░░░ 50%(09-28 19:28)
-```
+## 目录地图
 
-- 三条进度条统一配色：绿 <50%、黄 50–79%、红 ≥80%
-- ⚡ 为 5 小时滚动窗口额度，括号内是重置时刻（HH:MM）
-- 周额度括号内是精确重置时间（MM-DD HH:MM）
-- ctx 右侧的目录在 git 仓库内时追加分支名（detached 显示短 SHA）
+| 目录 / 文件 | 内容 | 恢复目标 |
+|---|---|---|
+| `tools/statusline/` | 状态栏工具（模型 / 上下文 / 目录 / git 分支 / GLM 额度进度条），详见其目录内 README | `~/.claude/`（由 `install.sh` 完成） |
+| `skills/ai-mentor/` | 自定义 skill：AI 导师（费曼式教学课件生成） | `~/.claude/skills/ai-mentor/` |
+| `skills/code-refactoring/` | 自定义 skill：代码抽象与重构工程方法论 | `~/.claude/skills/code-refactoring/` |
+| `mcp/mcp-servers.json` | MCP 服务器配置（从 `~/.claude.json` 的 `mcpServers` 字段提取） | 合并回 `~/.claude.json` 的 `mcpServers` 字段 |
+| `config/CLAUDE.md` | 全局指令（图片处理规则：强制使用智谱 MCP 视觉工具） | `~/.claude/CLAUDE.md` |
+| `config/settings.json` | 主设置：环境变量、模型映射（GLM）、权限黑白名单、主题、状态栏 | `~/.claude/settings.json` |
+| `config/settings.local.json` | 本地权限补充 | `~/.claude/settings.local.json` |
 
-## 安装
+## 密钥恢复
 
-把整个文件夹拷到目标机器，然后：
+所有 `YOUR_ZHIPU_API_KEY` 占位符需替换为真实的智谱 API Key（格式
+`xxxxxxxx.yyyyyyyy`，从 [open.bigmodel.cn](https://open.bigmodel.cn)
+获取），共涉及：
+
+- `config/settings.json` → `env.ANTHROPIC_AUTH_TOKEN`
+- `mcp/mcp-servers.json` → `zai-mcp-server.env.Z_AI_API_KEY`
+- `mcp/mcp-servers.json` → `web-search-prime` / `web-reader` / `zread` 的
+  `headers.Authorization`（`Bearer ` 前缀保留）
+
+## 恢复方法
 
 ```bash
-bash install.sh
+cp config/CLAUDE.md config/settings.json config/settings.local.json ~/.claude/
+cp -r skills/. ~/.claude/skills/
+bash tools/statusline/install.sh    # 状态栏三件套 + settings 合并
+# mcp/mcp-servers.json 需手动合并进 ~/.claude.json 的 "mcpServers" 字段
+# 最后将所有 YOUR_ZHIPU_API_KEY 替换为真实密钥
 ```
 
-脚本做三件事（幂等，可重复执行）：
+## 快照更新方法
 
-1. 拷贝 `statusline.py` / `glm_quota.py` / `statusline.sh` 到 `~/.claude/`
-2. 备份 `settings.json` 为 `settings.json.bak`
-3. 往 `settings.json` 合并写入 `statusLine` 键（其余配置不动）
+在 `~/.claude` 侧内容变更后，反向同步进本仓库：
 
-唯一依赖：**python3**（零第三方包）。额度数据需要
-`ANTHROPIC_AUTH_TOKEN`（GLM Coding Plan 的 key）——接 GLM 的机器一般已在
-`settings.json` 的 `env` 里，脚本和环境变量里任取其一。
+```bash
+cp ~/.claude/CLAUDE.md config/
+cp ~/.claude/settings.json ~/.claude/settings.local.json config/
+cp -r ~/.claude/skills/ai-mentor ~/.claude/skills/code-refactoring skills/
+# mcp-servers.json 从 ~/.claude.json 的 mcpServers 字段重新提取
+# 提交前务必把真实密钥替换回 YOUR_ZHIPU_API_KEY 占位符
+```
 
-## 文件说明
+## 未包含的内容
 
-| 文件 | 作用 |
-|---|---|
-| `statusline.py` | 主逻辑：解析 stdin JSON、进度条、配色、右对齐、git 分支 |
-| `glm_quota.py` | GLM 额度查询模块，可单独运行调试：`python3 glm_quota.py` |
-| `statusline.sh` | 入口薄包装（python3 缺失时回退 python），settings.json 指向它 |
-| `install.sh` | 一键安装 |
+以下为运行时状态或隐私数据，刻意排除：
 
-## 工作原理
-
-- **数据来源**：Claude Code 每次刷新把会话 JSON 写入 stdin（模型名、目录、
-  `context_window.used_percentage` 等；原始报文转存在 `/tmp/sl_stdin.json`
-  便于排查）。额度来自
-  `GET https://open.bigmodel.cn/api/monitor/usage/quota/limit`，
-  header 用 `ANTHROPIC_AUTH_TOKEN` 原文（**不带** Bearer 前缀），一次返回
-  5 小时窗（unit=3）与周窗（unit=6）。GET 查询不消耗 Coding Plan 额度。
-- **缓存**：额度结果缓存 60 秒（系统临时目录 `glm_quota_cache.json`），
-  状态栏刷新再频繁，每分钟最多一次真实请求；接口失败时沿用旧缓存，
-  状态栏不会闪空。
-- **右对齐**：Claude Code 传入的 JSON 里没有终端宽度字段，`ESC[999C` 之类
-  光标序列也会被渲染器吞掉。实际方案是沿 `/proc/<pid>/fd/0` 找到祖先进程
-  （claude）持有的 pty，用 `TIOCGWINSZ` ioctl 取真实列数后纯空格填充，
-  窗口缩放实时跟随。**仅 Linux 生效**；macOS / Windows 无 `/proc`，
-  自动退化为「左块 + 3 空格 + 右块」布局，其余功能不受影响。
-
-## 自定义
-
-改 `statusline.py` 顶部与 `main()`：
-
-- 进度条格数：`bar(pct, width=10)`
-- 配色阈值：`color_by(pct, lo=50, hi=80)`
-- 各段颜色表：`C = {...}`
-- 额度刷新频率：`glm_quota.py` 的 `TTL = 60`（秒）
-
-## 卸载
-
-删除 `settings.json` 里的 `statusLine` 键（或用安装前的
-`settings.json.bak` 恢复），再删掉 `~/.claude/` 下三个脚本即可。
-
-## claude-config/ — 用户配置备份
-
-[`claude-config/`](claude-config/) 是 `~/.claude/` 用户级配置的打包备份
-（全局 CLAUDE.md、settings、MCP 服务器、自定义 skills），密钥已替换为
-占位符，详见其目录内 README。
+- `projects/`、`sessions/`、`history.jsonl` — 会话记录与对话历史
+- `~/.claude.json` 中除 `mcpServers` 外的字段 — 机器 ID、使用统计、项目缓存等运行时状态
+- `backups/`、`debug/`、`shell-snapshots/`、`file-history/`、`paste-cache/` — 临时/缓存文件
+- `plugins/` — 插件本体可由 marketplace（superpowers 等）重新安装，`config/settings.json` 中已保留 marketplace 与插件开关配置
