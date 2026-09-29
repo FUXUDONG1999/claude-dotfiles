@@ -3,7 +3,7 @@
 
 流程（幂等，绝不改动工作区课件）：
 1. 扫描工作区课件 HTML；
-2. 组装站点到 <工作区>/.site-build/：拷贝课件与共享 assets、生成 index.html 目录页与 search-index.json 检索索引；
+2. 组装站点到 <工作区>/.site-build/：拷贝课件与共享 assets、生成 index.html 文档站首页（左目录树 + 右侧阅读区）与 search-index.json 检索索引；
 3. --deploy：调用 tcb hosting deploy 部署组装目录（--prune 清理远端多余文件），完成后删除组装目录。
 
 用法：
@@ -41,28 +41,30 @@ INDEX_PAGE_TEMPLATE = '''<!DOCTYPE html>
 <link rel="stylesheet" href="assets/courseware.css">
 </head>
 <body>
-<div class="index-page">
-  <h1>📚 知识课件库</h1>
-  <p class="index-meta">共 {page_count} 篇课件 · {group_count} 个分类 · 最近构建 {build_date}</p>
-  <input id="site-search-input" class="site-search-input" placeholder="正在加载搜索索引…" autocomplete="off" disabled>
-  <div id="search-result-container" hidden></div>
-  <div id="group-container">
+<div class="docs-layout">
+  <nav class="docs-nav">
+    <h1>📚 知识课件库</h1>
+    <input id="site-search-input" class="site-search-input" placeholder="正在加载搜索索引…" autocomplete="off" disabled>
+    <div id="search-result-container" hidden></div>
+    <div id="docs-tree">
 {group_sections}
-  </div>
+    </div>
+  </nav>
+  <iframe id="content-frame" class="docs-frame" title="课件内容"></iframe>
 </div>
-<script src="assets/site-search.js"></script>
+<script src="assets/site.js"></script>
 </body>
 </html>
 '''
 
-INDEX_GROUP_TEMPLATE = '''    <section class="index-group">
-      <h2>📁 {group_name}</h2>
-      <ul class="index-list">
+INDEX_GROUP_TEMPLATE = '''      <section class="docs-group">
+        <h2>📁 {group_name} <span class="docs-path">{group_path_label}</span></h2>
+        <ul class="docs-list">
 {index_entries}
-      </ul>
-    </section>'''
+        </ul>
+      </section>'''
 
-INDEX_ENTRY_TEMPLATE = '        <li><a href="{path}">{title}</a><span class="index-date">{date}</span></li>'
+INDEX_ENTRY_TEMPLATE = '          <li><a href="{path}" data-path="{path}">{title}</a></li>'
 
 
 def extract_plain_text(page_content: str) -> str:
@@ -126,7 +128,11 @@ def render_group_sections(catalog_entries: list) -> str:
             )
             for catalog_entry in grouped_entries[group_name]
         )
-        group_sections.append(INDEX_GROUP_TEMPLATE.format(group_name=group_name, index_entries=index_entries))
+        group_path_parts = group_name.split('/')
+        group_sections.append(INDEX_GROUP_TEMPLATE.format(
+            group_name=group_path_parts[-1],
+            group_path_label=' / '.join(group_path_parts),
+            index_entries=index_entries))
     return '\n'.join(group_sections)
 
 

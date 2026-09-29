@@ -55,19 +55,20 @@ mjx-container[jax="CHTML"] { line-height: 1.2 !important; }
 @media (max-width: 900px) { .main { padding: 18px 0; } .chapter { padding: 0 18px; } }
 
 /* ===== 目录页（index.html）补充样式：课件页面不使用，改样式不受模板约束 ===== */
-.index-page { max-width: 720px; margin: 48px auto; padding: 0 20px; }
-.index-page h1 { color: var(--accent); font-size: 30px; border-bottom: 2px solid var(--accent); padding-bottom: 8px; margin-bottom: 10px; }
-.index-meta { color: var(--text-secondary); font-size: 16px; margin-bottom: 18px; }
-.index-list { list-style: none; margin: 0; padding: 0; }
-.index-list li { background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); margin-bottom: 10px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
-.index-list a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 18px; }
-.index-list a:hover { color: var(--accent); }
-.index-date { color: var(--text-secondary); font-size: 14px; white-space: nowrap; margin-left: 12px; }
-.index-group { margin-bottom: 28px; }
-.index-group h2 { color: var(--accent); font-size: 18px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-.index-group .index-path { color: var(--text-secondary); font-size: 13px; font-weight: normal; }
-.site-search-input { width: 100%; box-sizing: border-box; padding: 11px 15px; font-size: 16px; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: 8px; outline: none; margin-bottom: 20px; }
+/* ===== 目录页（index.html）：左目录树 + 右侧阅读区（iframe），课件页面不使用 ===== */
+.docs-layout { display: flex; height: 100vh; }
+.docs-nav { width: 300px; min-width: 240px; box-sizing: border-box; padding: 18px 14px; overflow-y: auto; background: var(--card); border-right: 1px solid var(--border); }
+.docs-nav h1 { font-size: 20px; color: var(--accent); margin: 0 0 14px; }
+.docs-group { margin-bottom: 18px; }
+.docs-group h2 { font-size: 14.5px; color: var(--text-secondary); font-weight: 600; margin: 0 0 4px; padding: 4px 8px; }
+.docs-group h2 .docs-path { font-size: 12px; font-weight: normal; }
+.docs-list { list-style: none; margin: 0; padding: 0; }
+.docs-list li a { display: block; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none; font-size: 15px; line-height: 1.45; }
+.docs-list li a:hover { background: rgba(108,92,231,0.08); color: var(--accent); }
+.docs-list li a.active { background: rgba(108,92,231,0.14); color: var(--accent); font-weight: 600; }
+.docs-frame { flex: 1; border: none; width: 100%; }
+.site-search-input { width: 100%; box-sizing: border-box; padding: 10px 14px; font-size: 15px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; outline: none; margin-bottom: 14px; }
 .site-search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(108,92,231,0.15); }
-.index-list li.with-summary { flex-direction: column; align-items: flex-start; }
-.search-summary { color: var(--text-secondary); font-size: 14px; display: block; margin-top: 4px; line-height: 1.5; }
-.search-empty { color: var(--text-secondary); padding: 20px 0; }
+.search-summary { color: var(--text-secondary); font-size: 13px; display: block; margin-top: 3px; line-height: 1.5; }
+.search-empty { color: var(--text-secondary); padding: 16px 0; }
+@media (max-width: 900px) { .docs-layout { flex-direction: column; height: auto; min-height: 100vh; } .docs-nav { width: 100%; max-height: 42vh; border-right: none; border-bottom: 1px solid var(--border); } .docs-frame { min-height: 58vh; } }
