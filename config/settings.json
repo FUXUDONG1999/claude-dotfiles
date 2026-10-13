@@ -49,7 +49,9 @@
       "Bash(pwd)",
       "Bash(echo:*)",
       "Bash(curl:*)",
-      "Bash"
+      "Bash",
+      "Read(~/.claude/skills/ai-mentor/**)",
+      "Read(//root/.claude/skills/ai-mentor/**)"
     ],
     "deny": [
       "Bash(sudo:*)",
