@@ -6,15 +6,15 @@ When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` 
 
 写码、改码、评审前必须先完整阅读以下两份规则文件（以文件当前内容为唯一权威版本，凭记忆动手即违规）：
 
-@/Users/fuxudong/.claude/rules/代码编写规范.md
+@rules/代码编写规范.md
 
-@/Users/fuxudong/.claude/rules/代码架构规则.md
+@rules/代码架构规则.md
 
 # 问题排查规则（强制）
 
 问题排查、问题分析、调用链 / 影响面 / 耦合分析时，优先使用 codegraph 检索，结论必须回到源码取证：
 
-@/Users/fuxudong/.claude/rules/问题排查优先使用codegraph.md
+@rules/问题排查优先使用codegraph.md
 
 # 图片处理规则（强制）
 

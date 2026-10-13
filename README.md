@@ -33,7 +33,7 @@ skills 等内容的日常开发在 `~/.claude/` 进行，本仓库定期同步�
 ```bash
 cp config/CLAUDE.md config/settings.json config/settings.local.json ~/.claude/
 mkdir -p ~/.claude/rules && cp config/rules/*.md ~/.claude/rules/
-# CLAUDE.md 中的 @ 引用是绝对路径 /Users/fuxudong/.claude/rules/...，换用户名时需同步修改
+# CLAUDE.md 以相对路径 @rules/xxx.md 引用规则（相对 CLAUDE.md 所在目录），rules/ 须与 CLAUDE.md 同级
 cp -r skills/. ~/.claude/skills/
 bash tools/statusline/install.sh    # 状态栏三件套 + settings 合并
 # mcp/mcp-servers.json 需手动合并进 ~/.claude.json 的 "mcpServers" 字段
