@@ -2,21 +2,25 @@
 """课件站点聚合部署器：增量累积模式，云端 search-index.json 是站点清单权威。
 
 流程（幂等，绝不改动工作区课件）：
-1. 扫描工作区课件 HTML，得到本地条目（仅 title/path）；
+1. 扫描工作区课件 HTML，得到本地条目（仅 title/path）与领域分组描述
+   （各领域文件夹 folder-description.txt 的首行非空文本，仅采集进索引、不上传云端）；
 2. 拉取云端 search-index.json（带 cache-busting；404 视为空索引，网络异常则中止以免冲掉远端清单），
-   与本地条目按 path 合并，同名路径以本地为准（覆盖更新场景）；
+   与本地条目按 path 合并，同名路径以本地为准（覆盖更新场景）；--forget-path 可移除指定旧条目
+   （远端文件不删，仅从清单消失，用于存量课件迁入领域文件夹后的清洗）；
 3. 组装站点到 <工作区>/.site-build/：拷贝课件与共享 assets、按合并清单生成 index.html 文档站首页
-   （左目录树 + 右侧阅读区）与 search-index.json（瘦身：仅 title/path，分组从路径派生）；
+   （左目录树 + 右侧阅读区）与 search-index.json（瘦身：仅 title/path 与分组描述，分组从路径派生）；
 4. --deploy：调用 tcb hosting deploy 上传组装目录（只上传覆盖同名，不删除远端文件），
    完成后删除组装目录。换机器部署无需同步工作区全集：远端文件只增不删，孤儿文件不进清单即不可见。
 
 用法：
     python3 aggregate.py <课件工作区>              # 仅组装（仍拉取远端索引合并），保留 .site-build/ 供本地检查
     python3 aggregate.py <课件工作区> --deploy     # 组装 + 部署 + 清理（SKILL.md 标准流程）
+    python3 aggregate.py <课件工作区> --deploy --forget-path 旧主题.html  # 迁移清洗：旧平铺条目从清单移除
     python3 aggregate.py <任意目录> --site-only [--deploy]  # 仅按云端清单更新站点外壳（index.html/search-index.json/assets），不扫描、不上传课件
 """
 
 import argparse
+import html
 import json
 import re
 import shutil
@@ -34,8 +38,9 @@ TENCENT_CLOUD_APP_ID = '1259453558'
 REMOTE_INDEX_URL_TEMPLATE = 'https://{environment_id}-{app_id}.tcloudbaseapp.com/search-index.json?t={timestamp}'
 BUILD_DIRECTORY_NAME = '.site-build'
 
+FOLDER_DESCRIPTION_FILE_NAME = 'folder-description.txt'
 EXCLUDED_DIRECTORY_NAMES = {'assets', BUILD_DIRECTORY_NAME, 'site', '.git', 'node_modules'}
-EXCLUDED_FILE_NAMES = {'.DS_Store', 'search-index.json'}
+EXCLUDED_FILE_NAMES = {'.DS_Store', 'search-index.json', FOLDER_DESCRIPTION_FILE_NAME}
 
 PAGE_TITLE_PATTERN = re.compile(r'<title>(.*?)</title>', re.DOTALL)
 
@@ -68,8 +73,8 @@ INDEX_PAGE_TEMPLATE = '''<!DOCTYPE html>
 '''
 
 INDEX_GROUP_TEMPLATE = '''      <section class="docs-group">
-        <h2>📁 {group_name} <span class="docs-path">{group_path_label}</span></h2>
-        <ul class="docs-list">
+        <h2 class="docs-group-header" data-group="{group_key}" tabindex="0"><span>📁 {group_name} <span class="docs-path">{group_path_label}</span></span><span class="docs-toggle" aria-hidden="true"></span></h2>
+{group_description_block}        <ul class="docs-list">
 {index_entries}
         </ul>
       </section>'''
@@ -103,8 +108,29 @@ def collect_local_catalog_entries(workspace_root: Path) -> list:
     return catalog_entries
 
 
-def fetch_remote_catalog_entries(environment_id: str) -> list:
-    """拉取云端检索索引（时间戳参数防 CDN 缓存）；404 视为空索引，其余异常中止部署以免冲掉远端清单。"""
+def collect_local_group_descriptions(workspace_root: Path) -> dict:
+    """扫描各领域文件夹的 folder-description.txt，取首行非空文本作为分组描述（仅进索引，不上传云端）。"""
+    group_descriptions = {}
+    for description_file in sorted(workspace_root.rglob(FOLDER_DESCRIPTION_FILE_NAME)):
+        relative_directory = description_file.parent.relative_to(workspace_root).as_posix()
+        if relative_directory == '.' or relative_directory.split('/', 1)[0] in EXCLUDED_DIRECTORY_NAMES:
+            continue
+
+        description_lines = description_file.read_text(encoding='utf-8').splitlines()
+        first_meaningful_line = next(
+            (stripped_line for line in description_lines if (stripped_line := line.strip())),
+            '',
+        )
+        if first_meaningful_line:
+            group_descriptions[relative_directory] = first_meaningful_line
+    return group_descriptions
+
+
+def fetch_remote_catalog_entries(environment_id: str) -> tuple:
+    """拉取云端检索索引（时间戳参数防 CDN 缓存）；404 视为空索引，其余异常中止部署以免冲掉远端清单。
+
+    返回 (条目列表, 分组描述字典)；旧格式索引无 groups 字段时分组描述为空字典。
+    """
     remote_index_url = REMOTE_INDEX_URL_TEMPLATE.format(
         environment_id=environment_id,
         app_id=TENCENT_CLOUD_APP_ID,
@@ -117,7 +143,7 @@ def fetch_remote_catalog_entries(environment_id: str) -> list:
     except urllib.error.HTTPError as http_error:
         if http_error.code == 404:
             print('云端索引不存在（首次部署），从空清单起步。')
-            return []
+            return [], {}
         raise SystemExit(f'✗ 拉取云端索引失败：HTTP {http_error.code}（{remote_index_url}），已中止以免冲掉远端清单。')
     except (urllib.error.URLError, TimeoutError) as fetch_error:
         raise SystemExit(f'✗ 拉取云端索引失败：{fetch_error}（{remote_index_url}），已中止以免冲掉远端清单。')
@@ -126,26 +152,44 @@ def fetch_remote_catalog_entries(environment_id: str) -> list:
 
     if not isinstance(remote_payload, dict) or not isinstance(remote_payload.get('pages'), list):
         raise SystemExit(f'✗ 云端索引结构异常（缺少 pages 列表）：{remote_index_url}，已中止以免冲掉远端清单。')
+    remote_groups = remote_payload.get('groups', {})
+    if not isinstance(remote_groups, dict):
+        raise SystemExit(f'✗ 云端索引结构异常（groups 不是字典）：{remote_index_url}，已中止以免冲掉远端清单。')
 
     remote_entries = [
         {'title': remote_page['title'], 'path': remote_page['path']}
         for remote_page in remote_payload['pages']
         if isinstance(remote_page, dict) and 'title' in remote_page and 'path' in remote_page
     ]
-    print(f'拉取云端索引：{len(remote_entries)} 条现有条目（{remote_index_url}）。')
-    return remote_entries
+    print(f'拉取云端索引：{len(remote_entries)} 条现有条目、{len(remote_groups)} 个分组描述（{remote_index_url}）。')
+    return remote_entries, remote_groups
 
 
-def merge_catalog_entries(remote_entries: list, local_entries: list) -> list:
-    """合并云端与本地条目：以 path 为唯一键，同名路径本地覆盖云端（更新场景），按 path 排序保证输出确定。"""
+def merge_catalog_entries(remote_entries: list, local_entries: list, forgotten_paths: list = None) -> list:
+    """合并云端与本地条目：以 path 为唯一键，同名路径本地覆盖云端（更新场景），按 path 排序保证输出确定。
+
+    forgotten_paths 中的路径先于本地合并从云端清单移除（远端文件不删、仅从清单消失）；
+    若本地同路径条目仍存在，则本地为准重新并入。
+    """
     merged_entries = {catalog_entry['path']: catalog_entry for catalog_entry in remote_entries}
+    for forgotten_path in forgotten_paths or []:
+        removed_entry = merged_entries.pop(forgotten_path, None)
+        if removed_entry:
+            print(f'清单移除（--forget-path）：{forgotten_path}（远端文件保留，仅从清单消失）')
     for catalog_entry in local_entries:
         merged_entries[catalog_entry['path']] = catalog_entry
     return [merged_entries[path] for path in sorted(merged_entries)]
 
 
+def merge_group_descriptions(remote_groups: dict, local_groups: dict) -> dict:
+    """合并云端与本地分组描述：同名目录本地覆盖云端（描述更新场景）。"""
+    merged_groups = dict(remote_groups)
+    merged_groups.update(local_groups)
+    return merged_groups
+
+
 def copy_courseware_sources(workspace_root: Path, build_root: Path) -> None:
-    """把工作区的课件源文件按相对结构拷贝到组装目录（排除站点产物与系统文件）。"""
+    """把工作区的课件源文件按相对结构拷贝到组装目录（排除站点产物、系统文件与 folder-description.txt）。"""
     for source_file in workspace_root.rglob('*'):
         if not source_file.is_file():
             continue
@@ -167,8 +211,12 @@ def derive_group_name(page_path: str) -> str:
     return directory_path or TOP_LEVEL_GROUP_NAME
 
 
-def render_group_sections(catalog_entries: list) -> str:
-    """按目录分组渲染目录树：顶层课件不显示分组标题，其余分组按路径排序、组间横线分隔。"""
+def render_group_sections(catalog_entries: list, group_descriptions: dict = None) -> str:
+    """按目录分组渲染目录树：顶层课件不显示分组标题，其余分组按路径排序、组间横线分隔。
+
+    group_descriptions 提供时，在分组标题下渲染一行描述副标题（folder-description.txt 采集而来）。
+    """
+    group_descriptions = group_descriptions or {}
     grouped_entries = {}
     for catalog_entry in catalog_entries:
         grouped_entries.setdefault(derive_group_name(catalog_entry['path']), []).append(catalog_entry)
@@ -192,16 +240,28 @@ def render_group_sections(catalog_entries: list) -> str:
             group_sections.append(TOP_LEVEL_GROUP_TEMPLATE.format(index_entries=index_entries))
             continue
 
+        group_description = group_descriptions.get(group_name, '')
+        group_description_block = (
+            f'        <p class="docs-group-desc">{html.escape(group_description)}</p>\n' if group_description else ''
+        )
         group_path_parts = group_name.split('/')
         group_sections.append(INDEX_GROUP_TEMPLATE.format(
             group_name=group_path_parts[-1],
             group_path_label=' / '.join(group_path_parts),
+            group_key=group_name,
+            group_description_block=group_description_block,
             index_entries=index_entries))
     return '\n'.join(group_sections)
 
 
-def assemble_site(workspace_root: Path, catalog_entries: list, include_courseware: bool = True) -> Path:
+def assemble_site(
+        workspace_root: Path,
+        catalog_entries: list,
+        group_descriptions: dict = None,
+        include_courseware: bool = True,
+) -> Path:
     """组装完整站点到 <工作区>/.site-build/，返回组装目录；include_courseware=False 时只组装站点外壳。"""
+    group_descriptions = group_descriptions or {}
     build_root = workspace_root / BUILD_DIRECTORY_NAME
     if build_root.exists():
         shutil.rmtree(build_root)
@@ -212,11 +272,13 @@ def assemble_site(workspace_root: Path, catalog_entries: list, include_coursewar
     shutil.copytree(SHARED_ASSETS_SOURCE, build_root / 'assets')
 
     group_count = len({derive_group_name(catalog_entry['path']) for catalog_entry in catalog_entries})
-    index_page = INDEX_PAGE_TEMPLATE.format(group_sections=render_group_sections(catalog_entries))
+    index_page = INDEX_PAGE_TEMPLATE.format(
+        group_sections=render_group_sections(catalog_entries, group_descriptions))
     (build_root / 'index.html').write_text(index_page, encoding='utf-8')
     (build_root / 'search-index.json').write_text(
-        json.dumps({'pages': catalog_entries}, ensure_ascii=False), encoding='utf-8')
-    print(f'组装完成：{len(catalog_entries)} 篇课件 · {group_count} 个分组 → {build_root}')
+        json.dumps({'pages': catalog_entries, 'groups': group_descriptions}, ensure_ascii=False),
+        encoding='utf-8')
+    print(f'组装完成：{len(catalog_entries)} 篇课件 · {group_count} 个分组（{len(group_descriptions)} 条分组描述） → {build_root}')
     return build_root
 
 
@@ -234,6 +296,8 @@ def main() -> None:
     argument_parser.add_argument('workspace', help='课件工作区目录（<主题>/ 文件夹所在目录）')
     argument_parser.add_argument('--deploy', action='store_true', help='部署到 CloudBase 并清理组装目录')
     argument_parser.add_argument('--site-only', action='store_true', help='仅按云端清单更新站点外壳（index.html/search-index.json/assets），不扫描、不上传课件')
+    argument_parser.add_argument('--forget-path', action='append', default=[], metavar='PATH',
+                                 help='从合并清单移除指定云端条目，可多次传入（远端文件不删，仅从清单消失；存量课件迁入领域文件夹后的清洗用）')
     argument_parser.add_argument('--env-id', default=DEFAULT_ENV_ID, help=f'CloudBase 环境 ID（默认 {DEFAULT_ENV_ID}）')
     parsed_arguments = argument_parser.parse_args()
 
@@ -244,16 +308,24 @@ def main() -> None:
     if parsed_arguments.site_only:
         print('仅更新站点外壳模式：跳过本地课件扫描，清单以云端为准。')
         local_entries = []
+        local_groups = {}
     else:
         local_entries = collect_local_catalog_entries(workspace_root)
         if not local_entries:
             raise SystemExit(f'未在 {workspace_root} 找到课件 HTML（只更新站点外壳请改用 --site-only）')
+        local_groups = collect_local_group_descriptions(workspace_root)
 
-    remote_entries = fetch_remote_catalog_entries(parsed_arguments.env_id)
-    catalog_entries = merge_catalog_entries(remote_entries, local_entries)
+    remote_entries, remote_groups = fetch_remote_catalog_entries(parsed_arguments.env_id)
+    catalog_entries = merge_catalog_entries(remote_entries, local_entries, parsed_arguments.forget_path)
+    group_descriptions = merge_group_descriptions(remote_groups, local_groups)
     print(f'清单合并：云端 {len(remote_entries)} 条 + 本地 {len(local_entries)} 条 → {len(catalog_entries)} 条（同名路径本地覆盖）。')
 
-    build_root = assemble_site(workspace_root, catalog_entries, include_courseware=not parsed_arguments.site_only)
+    build_root = assemble_site(
+        workspace_root,
+        catalog_entries,
+        group_descriptions=group_descriptions,
+        include_courseware=not parsed_arguments.site_only,
+    )
 
     if parsed_arguments.deploy:
         deploy_site(build_root, parsed_arguments.env_id)

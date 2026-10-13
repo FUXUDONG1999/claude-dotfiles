@@ -65,8 +65,8 @@ description: "A cross-disciplinary AI tutor (Zhiyuan/智渊) blending Feynman-st
 
 ## 交付形态（两体裁共享）
 
-1. **课件平铺（强制）**：课件直接写为 `工作区/<主题>.html`（如 `二次型.html`）——单文件产物不需要文件夹包裹，禁止再建 `<主题>/` 目录。**禁止生成任何附属文件**：不写 README.md、不写实战代码（.py）、不产出数据图（png）等——课件即全部交付物（唯一例外：`assets/` 共享资源目录——站点基础设施，非课件产物）。
-2. **HTML 分块写入（强制）**：将单文件 HTML 写入 `工作区/<主题>.html`。
+1. **课件按领域归档（强制）**：课件写为 `工作区/<领域>/<主题>.html`（如 `强化学习/PPO.html`）。领域文件夹**恒为一层深**、简短中文名（约 2–6 字，如 `强化学习/`、`数学基础/`）。**归档纪律（防文件夹碎片化）**：动笔前先查看工作区已有领域文件夹，能归入现有文件夹就不新建；确实没有合适的才新建领域文件夹。**新建领域文件夹时必须同步写说明文件** `<领域>/folder-description.txt`（一行中文，说明该文件夹存放什么内容，目录页分组标题下会展示）；此后向已有文件夹新增课件不再动它。**禁止生成任何其他附属文件**：不写 README.md、不写实战代码（.py）、不产出数据图（png）等——课件即全部交付物（例外仅二：`assets/` 共享资源目录与领域文件夹的 `folder-description.txt`，均为站点基础设施，非课件产物）。
+2. **HTML 分块写入（强制）**：将单文件 HTML 写入 `工作区/<领域>/<主题>.html`。
    - **为什么分块**：Write 工具的单次输入过长时会被截断——实测约 17 KB 即 JSON 在字符串中途断裂、解析失败。根因是单次回复的输出长度上限，与上下文窗口大小无关，课件（含中文正文 + SVG + LaTeX）极易超限。
    - **安全阈值**：单块 ≤ 10 KB（中文按 3 字节/字计），宁可多分几块。
    - **文件命名**：`<主题>.html` 与提问语言一致（中文题用中文名，如 `KV缓存.html`；英文缩写术语可保留原文，如 `KV-cache.html`），文件名不含空格。
@@ -90,10 +90,10 @@ description: "A cross-disciplinary AI tutor (Zhiyuan/智渊) blending Feynman-st
    - **篇幅克制**：以体裁文件规定的篇幅为准（篇幅数字只在体裁文件出现，单一来源），宁可精炼也不要注水，生成速度与阅读体验同样重要；
    - **统一样式与共享资源（强制，禁止内联）**：课件不写任何 `<style>` 内联样式，MathJax 配置不内联，统一外链工作区共享资源：
      - 首次生成课件前，若 `<工作区>/assets/` 不存在，执行 `cp -R ~/.claude/skills/ai-mentor/publish/assets <工作区>/assets`（已存在则原样使用，禁止改动）；assets 中课件页实际使用的只有 `courseware.css` 与 `mathjax-config.js` 两个文件，`site.js` 仅供站点聚合外壳（目录页搜索），**课件禁止引入**；
-     - 课件 `<head>` 内固定三行（课件平铺在工作区根、与 `assets/` 同级，路径恒为此写法，**逐字复制**）：
+     - 课件 `<head>` 内固定三行（课件恒在领域文件夹一层深处，`assets/` 在工作区根，故恒以 `../assets/` 引用，路径恒为此写法，**逐字复制**）：
        ```html
-       <link rel="stylesheet" href="assets/courseware.css">
-       <script src="assets/mathjax-config.js"></script>
+       <link rel="stylesheet" href="../assets/courseware.css">
+       <script src="../assets/mathjax-config.js"></script>
        <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
        ```
      - 样式全部固化在 `courseware.css`（权威版本位于 `~/.claude/skills/ai-mentor/publish/assets/`，改样式只改该文件、全站生效），课件中直接使用其类名：五种卡片 `.intuition/.formula/.number/.warning/.aha`，布局 `.container/.main/.chapter`（`.sidebar` 为站点目录页专用，课件禁用），辅助 `.badge/.highlight/.svg-container/.footer/.label`——禁止自创类名、禁止内联覆盖配色与间距。样式化 HTML `<table>`、折叠 `<details><summary>` 与行内代码 `<code>` 为无类名元素，样式同样已在共享 CSS 内。
@@ -111,7 +111,7 @@ description: "A cross-disciplinary AI tutor (Zhiyuan/智渊) blending Feynman-st
    ```bash
    python3 ~/.claude/skills/ai-mentor/publish/aggregate.py <课件工作区绝对路径> --deploy
    ```
-   部署语义：**云端 search-index.json 是站点清单权威（仅存 title/path）**——换机器部署无需同步工作区全集，远端课件只增不删，孤儿文件不进清单即不可见；本地同名路径覆盖云端条目（课件更新场景）。访问入口 `https://ai-mentor-d3g171es499a57dd1-1259453558.tcloudbaseapp.com/`，导读附此链接；CDN 缓存几分钟刷新，用户反馈"没更新"提醒无痕窗口确认；curl 测默认域名会看到 `content-disposition: attachment` 头，用户浏览器实测可正常预览，以用户实测为准，勿反复用 curl 验证。
+   部署语义：**云端 search-index.json 是站点清单权威（仅存 title/path 与分组描述）**——换机器部署无需同步工作区全集，远端课件只增不删，孤儿文件不进清单即不可见；本地同名路径覆盖云端条目（课件更新场景）。领域文件夹的分组描述（各文件夹 `folder-description.txt` 首行）随清单一起存进索引，目录页分组标题下展示；说明文件本身不上传云端。**存量课件迁入领域文件夹后的清洗**：本地移动文件后，部署时追加 `--forget-path <旧路径>`（可多次）把旧平铺条目从清单移除（远端文件保留、仅从清单消失）。访问入口 `https://ai-mentor-d3g171es499a57dd1-1259453558.tcloudbaseapp.com/`，导读附此链接；CDN 缓存几分钟刷新，用户反馈"没更新"提醒无痕窗口确认；curl 测默认域名会看到 `content-disposition: attachment` 头，用户浏览器实测可正常预览，以用户实测为准，勿反复用 curl 验证。
    **不上传远端的两种模式**：本地预览——省略 `--deploy`（组装到 `.site-build/`，可本地打开检查）；完全离线——整体跳过聚合步骤。
 
 ## 注意事项（两体裁共享）
@@ -126,10 +126,11 @@ description: "A cross-disciplinary AI tutor (Zhiyuan/智渊) blending Feynman-st
 
 ## 共享技术检查清单（两体裁都要过；体裁清单见各体裁文件，先体裁后本清单）
 
-- [ ] 课件为工作区根下 `<主题>.html` 单文件（无主题文件夹包裹、无 README/py/png 等附属产物）
+- [ ] 课件位于 `<领域>/<主题>.html`（领域文件夹一层深、简短中文名；已优先归入现有领域文件夹）
+- [ ] 新建领域文件夹时已写 `folder-description.txt`（一行中文说明）；除该文件与 `assets/` 外无 README/py/png 等附属产物
 - [ ] 分块写入收尾自查：`<!--MORE-->` 标记清零、`section/div` 开闭计数平衡、闭合标签齐全
 - [ ] 正文与 SVG 内无裸货币 `$`、无裸尖括号数学片段（`\lt`/`\gt` 已用）
-- [ ] `<head>` 外链三行正确（courseware.css / mathjax-config.js / CDN MathJax），无内联样式、无内联 MathJax 配置
+- [ ] `<head>` 外链三行正确（`../assets/courseware.css` / `../assets/mathjax-config.js` / CDN MathJax），无内联样式、无内联 MathJax 配置
 - [ ] 全文无任何 `<script>` 业务逻辑（MathJax 引入除外）；图示全部为静态内联 SVG
 - [ ] 未自创 CSS 类名，卡片/布局/辅助类名均在共享清单内
 - [ ] 明暗两模式均可读（浅色默认，深色走 `prefers-color-scheme`）
