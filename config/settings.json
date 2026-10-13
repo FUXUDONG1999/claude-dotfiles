@@ -48,14 +48,11 @@
       "Bash(which:*)",
       "Bash(pwd)",
       "Bash(echo:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash"
     ],
     "deny": [
       "Bash(sudo:*)",
-      "Read(./.env)",
-      "Read(./.env.*)",
-      "Read(**/.env)",
-      "Read(**/.env.*)",
       "Read(**/credentials*)",
       "Read(**/*id_rsa*)",
       "Read(**/*.pem)"
