@@ -17,6 +17,8 @@ export function createBridge(dependencies) {
     sessionStore: dependencies.sessionStore,
     wsClientAdapter: dependencies.wsClientAdapter,
     logWriter: dependencies.logWriter,
+    draining: false,
+    activeTasks: new Map(),
     taskQueue: dependencies.taskQueueFactory
       ? dependencies.taskQueueFactory(dependencies.configuration.maxConcurrentTasks)
       : new ChatTaskQueue(dependencies.configuration.maxConcurrentTasks),
@@ -24,9 +26,14 @@ export function createBridge(dependencies) {
 
   return {
     dependencies: bridgeState.dependencies,
+    taskQueue: bridgeState.taskQueue,
 
     handleTextMessage: (frame) => handleTextMessage(bridgeState, frame),
     handleEnterChatEvent: (frame) => handleEnterChatEvent(bridgeState, frame),
+    beginDrain: () => {
+      bridgeState.draining = true;
+    },
+    shutdown: (shutdownOptions) => shutdownBridge(bridgeState, shutdownOptions),
   };
 }
 
@@ -43,6 +50,12 @@ async function handleTextMessage(bridgeState, frame) {
   const messageContent = (messageBody.text?.content ?? '').trim();
 
   if (!messageContent) {
+    return;
+  }
+
+  if (bridgeState.draining) {
+    await sendSingleReply(bridgeState, frame, '🔄 服务正在重启维护，暂不接收新消息；运行中的任务会继续完成，稍后请重发。');
+
     return;
   }
 
@@ -192,6 +205,9 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
   const record = bridgeState.sessionStore.getRecord(chatIdentifier);
   const workingDirectory = record?.workingDirectory ?? configuration.defaultWorkingDirectory;
   const streamIdentifier = generateStreamIdentifier();
+  const heartbeatMonitor = startHeartbeatMonitor(bridgeState, activeChatIdentifier);
+
+  bridgeState.activeTasks.set(chatIdentifier, activeChatIdentifier);
 
   const reply = new ThrottledStreamReply({
     sendFunction: (content, finish) => bridgeState.wsClientAdapter.replyStream(frame, streamIdentifier, content, finish),
@@ -239,9 +255,13 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
         allowedTools: configuration.allowedTools,
         taskTimeoutMilliseconds: configuration.taskTimeoutMilliseconds,
       },
-      onProgressText: (progressText) => reply.push(progressText),
+      onProgressText: (progressText) => {
+        heartbeatMonitor?.markProgress();
+        reply.push(progressText);
+      },
     });
 
+    heartbeatMonitor?.stop();
     await reply.finish(decorateTaskResultText(taskResult));
     persistSessionAfterTask(bridgeState, chatIdentifier, {
       continuationEnabled,
@@ -260,7 +280,80 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
     bridgeState.logger.error('任务执行异常', error);
     bridgeState.sessionStore.demoteActiveSession(chatIdentifier);
     await reply.finish(`❌ 任务执行异常：${error.message}`);
+  } finally {
+    heartbeatMonitor?.stop();
+    bridgeState.activeTasks.delete(chatIdentifier);
   }
+}
+
+// 静默心跳：任务长时间无新输出时主动推送「仍在工作」，替代用户发消息探测。
+// 返回 null 表示心跳未启用（间隔 ≤ 0）。
+function startHeartbeatMonitor(bridgeState, activeChatIdentifier) {
+  const intervalMilliseconds = bridgeState.configuration.heartbeatIntervalMilliseconds;
+
+  if (!intervalMilliseconds || intervalMilliseconds <= 0) {
+    return null;
+  }
+
+  let lastProgressAt = Date.now();
+
+  const timer = setInterval(() => {
+    const silentMilliseconds = Date.now() - lastProgressAt;
+
+    if (silentMilliseconds < intervalMilliseconds) {
+      return;
+    }
+
+    const silentDescription = silentMilliseconds < 60_000
+      ? `${Math.round(silentMilliseconds / 1000)} 秒`
+      : `${Math.round(silentMilliseconds / 60_000)} 分钟`;
+
+    try {
+      bridgeState.wsClientAdapter.sendMessage(activeChatIdentifier, {
+        msgtype: 'markdown',
+        markdown: { content: `⏳ 任务仍在工作（已静默 ${silentDescription}），完成后会自动推送结果，无需催促。` },
+      }).catch((error) => bridgeState.logger.warn('心跳推送失败', error?.message ?? error));
+    } catch (sendError) {
+      bridgeState.logger.warn('心跳推送失败', sendError?.message ?? sendError);
+    }
+  }, intervalMilliseconds);
+
+  return {
+    markProgress: () => {
+      lastProgressAt = Date.now();
+    },
+    stop: () => {
+      clearInterval(timer);
+    },
+  };
+}
+
+// 优雅停机：拒绝新任务 → 等待在途任务排空（上限可配）→ 超时的会话推送中断通知（指向 /resume）。
+async function shutdownBridge(bridgeState, shutdownOptions = {}) {
+  bridgeState.draining = true;
+
+  const drainTimeoutMilliseconds = shutdownOptions.drainTimeoutMilliseconds
+    ?? bridgeState.configuration.drainTimeoutMilliseconds;
+  const drainResult = await bridgeState.taskQueue.waitForIdle(drainTimeoutMilliseconds);
+
+  if (drainResult.idle) {
+    return { idle: true, interruptedChatIdentifiers: [] };
+  }
+
+  const interruptedChatIdentifiers = [...bridgeState.activeTasks.keys()];
+
+  for (const [chatIdentifier, activeChatIdentifier] of bridgeState.activeTasks) {
+    try {
+      await bridgeState.wsClientAdapter.sendMessage(activeChatIdentifier, {
+        msgtype: 'markdown',
+        markdown: { content: '⚠️ 服务重启，正在运行的任务被中断；服务恢复后发 /resume 可恢复会话接着干，未完成的部分请重发指令。' },
+      });
+    } catch (error) {
+      bridgeState.logger.error(`中断通知发送失败（${chatIdentifier}）`, error);
+    }
+  }
+
+  return { idle: false, interruptedChatIdentifiers };
 }
 
 // 任务结束后的会话记录维护：失败自愈降级；成功则按「续接→刷新计时 / 全新→建立当前会话」落账。

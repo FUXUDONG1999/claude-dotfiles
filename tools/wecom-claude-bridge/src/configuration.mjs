@@ -39,6 +39,8 @@ export function loadConfiguration(environment = process.env) {
     maxConcurrentTasks: readPositiveNumber(mergedEnvironment.MAX_CONCURRENT_TASKS, 3),
     chatSessionContinuationEnabled: mergedEnvironment.CONTINUE_SESSION_PER_CHAT === 'true',
     sessionTtlMilliseconds: readPositiveNumber(mergedEnvironment.SESSION_TTL_HOURS, 6) * 3600_000,
+    drainTimeoutMilliseconds: readPositiveNumber(mergedEnvironment.DRAIN_TIMEOUT_MINUTES, 15) * 60_000,
+    heartbeatIntervalMilliseconds: readNonNegativeNumber(mergedEnvironment.HEARTBEAT_INTERVAL_MINUTES, 5) * 60_000,
     stateDirectory,
     logDirectory,
     hardDeadlineNoticeText: '任务仍在运行（超过企微流式时间限制）',
@@ -91,6 +93,17 @@ function readPositiveNumber(value, fallbackValue) {
   const parsedNumber = Number(value);
 
   if (!Number.isFinite(parsedNumber) || parsedNumber <= 0) {
+    return fallbackValue;
+  }
+
+  return parsedNumber;
+}
+
+// 与 readPositiveNumber 的差别：允许 0（语义为「关闭该功能」）。
+function readNonNegativeNumber(value, fallbackValue) {
+  const parsedNumber = Number(value);
+
+  if (!Number.isFinite(parsedNumber) || parsedNumber < 0) {
     return fallbackValue;
   }
 

@@ -5,8 +5,10 @@ export class ChatTaskQueue {
     this.maxConcurrentTasks = maxConcurrentTasks;
     this.chatChains = new Map();
     this.chatPendingCounts = new Map();
+    this.runningChats = new Map();
     this.runningCount = 0;
     this.waitingCallers = [];
+    this.idleWaiters = [];
   }
 
   async enqueue(chatIdentifier, taskFunction) {
@@ -39,14 +41,50 @@ export class ChatTaskQueue {
     };
   }
 
+  // 等待队列完全排空（无运行中、无排队）；超时则返回非 idle 及仍在运行的会话清单。
+  // 供优雅停机使用：调用方据 idle 决定是否发中断通知。
+  async waitForIdle(timeoutMilliseconds) {
+    if (this.isIdle()) {
+      return { idle: true, runningChatIdentifiers: [] };
+    }
+
+    return new Promise((resolveWaiter) => {
+      const resolveAsIdle = () => {
+        clearTimeout(timeoutHandle);
+        resolveWaiter({ idle: true, runningChatIdentifiers: [] });
+      };
+      const timeoutHandle = setTimeout(() => {
+        this.idleWaiters = this.idleWaiters.filter((waiter) => waiter !== resolveAsIdle);
+        resolveWaiter({ idle: false, runningChatIdentifiers: [...this.runningChats.keys()] });
+      }, timeoutMilliseconds);
+
+      this.idleWaiters.push(resolveAsIdle);
+    });
+  }
+
+  isIdle() {
+    return this.runningCount === 0 && this.chatPendingCounts.size === 0;
+  }
+
+  notifyIdleWaitersIfReached() {
+    if (this.isIdle() && this.idleWaiters.length > 0) {
+      const waiters = this.idleWaiters;
+      this.idleWaiters = [];
+      waiters.forEach((waiter) => waiter());
+    }
+  }
+
   async runWithSlot(taskFunction, chatIdentifier) {
     await this.acquireSlot();
     this.decreasePendingCount(chatIdentifier);
+    this.increaseRunningChat(chatIdentifier);
 
     try {
       return await taskFunction();
     } finally {
       this.releaseSlot();
+      this.decreaseRunningChat(chatIdentifier);
+      this.notifyIdleWaitersIfReached();
     }
   }
 
@@ -74,6 +112,22 @@ export class ChatTaskQueue {
 
   increasePendingCount(chatIdentifier) {
     this.chatPendingCounts.set(chatIdentifier, (this.chatPendingCounts.get(chatIdentifier) ?? 0) + 1);
+  }
+
+  increaseRunningChat(chatIdentifier) {
+    this.runningChats.set(chatIdentifier, (this.runningChats.get(chatIdentifier) ?? 0) + 1);
+  }
+
+  decreaseRunningChat(chatIdentifier) {
+    const nextCount = (this.runningChats.get(chatIdentifier) ?? 1) - 1;
+
+    if (nextCount <= 0) {
+      this.runningChats.delete(chatIdentifier);
+
+      return;
+    }
+
+    this.runningChats.set(chatIdentifier, nextCount);
   }
 
   decreasePendingCount(chatIdentifier) {

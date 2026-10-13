@@ -117,3 +117,47 @@ test('ChatTaskQueue getStatus 反映排队与运行状态', async () => {
 
   assert.equal(queue.getStatus().runningCount, 0);
 });
+
+test('ChatTaskQueue waitForIdle 空闲时立即返回 idle', async () => {
+  const queue = new ChatTaskQueue(1);
+
+  const result = await queue.waitForIdle(100);
+
+  assert.equal(result.idle, true);
+  assert.deepEqual(result.runningChatIdentifiers, []);
+});
+
+test('ChatTaskQueue waitForIdle 等待运行中与排队任务全部完成后返回 idle', async () => {
+  const queue = new ChatTaskQueue(2);
+  const gate = createGate();
+  const firstPromise = queue.enqueue('chat-1', () => gate.waitToOpen());
+  const secondPromise = queue.enqueue('chat-2', async () => {});
+
+  await waitForCondition(() => queue.getStatus().runningCount === 1);
+
+  const idlePromise = queue.waitForIdle(2_000);
+  gate.open();
+
+  const result = await idlePromise;
+  await Promise.all([firstPromise, secondPromise]);
+
+  assert.equal(result.idle, true);
+  assert.deepEqual(result.runningChatIdentifiers, []);
+});
+
+test('ChatTaskQueue waitForIdle 超时返回非 idle 并报告仍在运行的会话', async () => {
+  const queue = new ChatTaskQueue(1);
+  const gate = createGate();
+  const firstPromise = queue.enqueue('chat-A', () => gate.waitToOpen());
+  const secondPromise = queue.enqueue('chat-B', async () => {});
+
+  await waitForCondition(() => queue.getStatus().runningCount === 1);
+
+  const result = await queue.waitForIdle(50);
+
+  assert.equal(result.idle, false);
+  assert.deepEqual(result.runningChatIdentifiers, ['chat-A']);
+
+  gate.open();
+  await Promise.all([firstPromise, secondPromise]);
+});

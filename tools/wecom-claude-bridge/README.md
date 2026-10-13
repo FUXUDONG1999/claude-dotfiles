@@ -63,6 +63,8 @@ STREAM_HARD_DEADLINE_MILLISECONDS=300000
 MAX_CONCURRENT_TASKS=3
 CONTINUE_SESSION_PER_CHAT=false
 SESSION_TTL_HOURS=6
+DRAIN_TIMEOUT_MINUTES=15
+HEARTBEAT_INTERVAL_MINUTES=5
 STATE_DIRECTORY=./state
 LOG_DIRECTORY=./logs
 ```
@@ -80,6 +82,9 @@ After=network-online.target
 Type=simple
 WorkingDirectory=/home/your-user/wecom-claude-bridge
 ExecStart=/usr/bin/node src/main.mjs
+# 优雅停机必需：默认 control-group 会在 stop 时立即 SIGTERM 全部子进程（含正在跑的 claude 任务）
+KillMode=mixed
+TimeoutStopSec=16min
 Restart=always
 RestartSec=5
 
@@ -92,6 +97,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-claude-bridge
 journalctl -u wecom-claude-bridge -f   # 看日志
 ```
+
+**优雅重启**：`systemctl restart` 不会立刻杀掉正在运行的 Claude 任务——服务先拒绝新消息，等待在途任务完成（上限 `DRAIN_TIMEOUT_MINUTES`，默认 15 分钟；`TimeoutStopSec` 应大于它）。超时未完成的任务会被中断，并向对应会话推送中断通知（可用 `/resume` 恢复会话）。再发一次 stop 信号则立即退出。**运行中任务静默超过 `HEARTBEAT_INTERVAL_MINUTES`（默认 5，设 0 关闭）时，会主动推送「仍在工作」心跳**，无需发消息探测。
 
 ## 使用
 

@@ -23,7 +23,13 @@ function createTextFrame({ userId = 'dong', chatId = null, content }) {
   };
 }
 
-function createBridgeFixture({ allowedUserIds = ['dong'], chatSessionContinuationEnabled = false } = {}) {
+function createBridgeFixture({
+  allowedUserIds = ['dong'],
+  chatSessionContinuationEnabled = false,
+  heartbeatIntervalMilliseconds = 0,
+  useRealTaskQueue = false,
+  claudeTaskRunner,
+} = {}) {
   const stateDirectory = mkdtempSync(join(tmpdir(), 'wecom-bridge-test-'));
   let currentTime = 1_000;
 
@@ -41,6 +47,9 @@ function createBridgeFixture({ allowedUserIds = ['dong'], chatSessionContinuatio
       streamIntervalMilliseconds: 10,
       streamHardDeadlineMilliseconds: 60_000,
       hardDeadlineNoticeText: '任务仍在运行，完成后另行推送',
+      heartbeatIntervalMilliseconds,
+      drainTimeoutMilliseconds: 2_000,
+      maxConcurrentTasks: 3,
       logDirectory: join(stateDirectory, 'logs'),
     },
     wsClientAdapter: {
@@ -52,7 +61,7 @@ function createBridgeFixture({ allowedUserIds = ['dong'], chatSessionContinuatio
       },
       replyWelcome: async () => {},
     },
-    claudeTaskRunner: async (runnerOptions) => {
+    claudeTaskRunner: claudeTaskRunner ?? (async (runnerOptions) => {
       capturedRunnerOptions.push(runnerOptions);
       runnerOptions.onProgressText('中间进度');
       await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 30));
@@ -65,8 +74,8 @@ function createBridgeFixture({ allowedUserIds = ['dong'], chatSessionContinuatio
         timedOut: false,
         exitCode: 0,
       };
-    },
-    taskQueueFactory: (maxConcurrentTasks) => {
+    }),
+    taskQueueFactory: useRealTaskQueue ? undefined : (maxConcurrentTasks) => {
       const imported = new Map();
 
       return {
@@ -386,6 +395,160 @@ test('createBridge /resume 序号超出范围时回复范围提示', async () =>
 
     assert.ok(allRepliedTextOf(fixture).includes('超出范围'));
     assert.equal(fixture.sessionStore.getRecord('single:dong').active.sessionId, 'session-b');
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+async function waitForBridgeCondition(conditionFunction, timeoutMilliseconds = 2_000) {
+  const startedAtMilliseconds = Date.now();
+
+  while (!conditionFunction()) {
+    if (Date.now() - startedAtMilliseconds > timeoutMilliseconds) {
+      throw new Error('等待条件超时');
+    }
+
+    await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 5));
+  }
+}
+
+function createBlockingTaskResult() {
+  return {
+    success: true,
+    sessionId: 'session-blocking',
+    resultText: '阻塞任务完成',
+    costUsd: 0.01,
+    durationMilliseconds: 100,
+    timedOut: false,
+    exitCode: 0,
+  };
+}
+
+test('createBridge beginDrain 后新消息收到维护提示且不执行任务', async () => {
+  const fixture = createBridgeFixture();
+
+  try {
+    fixture.bridge.beginDrain();
+    await fixture.bridge.handleTextMessage(createTextFrame({ content: '新任务' }));
+
+    assert.ok(allRepliedTextOf(fixture).includes('重启维护'));
+    assert.equal(fixture.capturedRunnerOptions.length, 0);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge shutdown 空闲时立即返回 idle 且无中断通知', async () => {
+  const fixture = createBridgeFixture({ useRealTaskQueue: true });
+
+  try {
+    const result = await fixture.bridge.shutdown({ drainTimeoutMilliseconds: 100 });
+
+    assert.equal(result.idle, true);
+    assert.deepEqual(result.interruptedChatIdentifiers, []);
+    assert.equal(fixture.activeMessages.length, 0);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge shutdown 等待运行中任务自然完成，不打扰会话', async () => {
+  let releaseBlockingTask;
+  const fixture = createBridgeFixture({
+    useRealTaskQueue: true,
+    claudeTaskRunner: () => new Promise((resolveTask) => {
+      releaseBlockingTask = resolveTask;
+    }),
+  });
+
+  try {
+    const handlePromise = fixture.bridge.handleTextMessage(createTextFrame({ content: '慢任务' }));
+
+    await waitForBridgeCondition(() => fixture.bridge.taskQueue.getStatus().runningCount === 1);
+
+    const shutdownPromise = fixture.bridge.shutdown({ drainTimeoutMilliseconds: 2_000 });
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+
+    releaseBlockingTask(createBlockingTaskResult());
+    const result = await shutdownPromise;
+    await handlePromise;
+
+    assert.equal(result.idle, true);
+    assert.equal(fixture.activeMessages.length, 0);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge shutdown 超时后向运行中任务的会话推送中断通知（含 /resume 提示）', async () => {
+  let releaseBlockingTask;
+  const fixture = createBridgeFixture({
+    useRealTaskQueue: true,
+    claudeTaskRunner: () => new Promise((resolveTask) => {
+      releaseBlockingTask = resolveTask;
+    }),
+  });
+
+  try {
+    const handlePromise = fixture.bridge.handleTextMessage(createTextFrame({ content: '慢任务' }));
+
+    await waitForBridgeCondition(() => fixture.bridge.taskQueue.getStatus().runningCount === 1);
+
+    const result = await fixture.bridge.shutdown({ drainTimeoutMilliseconds: 50 });
+
+    assert.equal(result.idle, false);
+    assert.deepEqual(result.interruptedChatIdentifiers, ['single:dong']);
+    assert.equal(fixture.activeMessages.length, 1);
+    assert.equal(fixture.activeMessages[0].chatIdentifier, 'dong');
+    assert.ok(fixture.activeMessages[0].body.markdown.content.includes('/resume'));
+
+    releaseBlockingTask(createBlockingTaskResult());
+    await handlePromise;
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge 任务静默超过心跳间隔时推送"仍在工作"心跳', async () => {
+  const fixture = createBridgeFixture({
+    heartbeatIntervalMilliseconds: 60,
+    claudeTaskRunner: async (runnerOptions) => {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
+
+      return createBlockingTaskResult();
+    },
+  });
+
+  try {
+    await fixture.bridge.handleTextMessage(createTextFrame({ content: '安静的任务' }));
+
+    const heartbeats = fixture.activeMessages.filter((message) => message.body.markdown.content.includes('仍在工作'));
+
+    assert.ok(heartbeats.length >= 1, `期望至少一条心跳，实际推送：${JSON.stringify(fixture.activeMessages)}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge 任务持续有进度时不推送心跳', async () => {
+  const fixture = createBridgeFixture({
+    heartbeatIntervalMilliseconds: 60,
+    claudeTaskRunner: async (runnerOptions) => {
+      for (let index = 0; index < 8; index += 1) {
+        runnerOptions.onProgressText(`进度 ${index}`);
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+      }
+
+      return createBlockingTaskResult();
+    },
+  });
+
+  try {
+    await fixture.bridge.handleTextMessage(createTextFrame({ content: '热闹的任务' }));
+
+    const heartbeats = fixture.activeMessages.filter((message) => message.body.markdown.content.includes('仍在工作'));
+
+    assert.equal(heartbeats.length, 0);
   } finally {
     fixture.cleanup();
   }

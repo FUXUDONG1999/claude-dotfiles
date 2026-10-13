@@ -39,8 +39,38 @@ wsClient.on('error', (error) => logger.error('WebSocket 错误', error?.message 
 
 wsClient.connect();
 
-process.on('SIGINT', () => {
-  logger.info('收到退出信号，断开连接。');
+// 优雅停机：SIGTERM/SIGINT → 拒绝新任务 → 等待在途任务排空（上限 DRAIN_TIMEOUT_MINUTES）
+// → 超时会话推送中断通知。再收一次信号则立即退出（逃生门）。
+let shutdownStarted = false;
+
+async function shutdownGracefully(signalName) {
+  if (shutdownStarted) {
+    logger.info('再次收到退出信号，立即退出。');
+    process.exit(0);
+  }
+
+  shutdownStarted = true;
+  logger.info(`收到 ${signalName}，开始排空运行中的任务（上限 ${Math.round(configuration.drainTimeoutMilliseconds / 60_000)} 分钟）…`);
+
+  try {
+    const shutdownResult = await bridge.shutdown();
+
+    if (shutdownResult.idle) {
+      logger.info('任务已全部排空，正常退出。');
+    } else {
+      logger.warn(`排空超时，${shutdownResult.interruptedChatIdentifiers.length} 个会话的任务被中断，已推送中断通知。`);
+    }
+  } catch (error) {
+    logger.error('排空过程出错', error);
+  }
+
   wsClient.disconnect();
   process.exit(0);
+}
+
+process.on('SIGTERM', () => {
+  shutdownGracefully('SIGTERM');
+});
+process.on('SIGINT', () => {
+  shutdownGracefully('SIGINT');
 });
