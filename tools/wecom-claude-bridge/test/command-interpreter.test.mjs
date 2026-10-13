@@ -19,6 +19,14 @@ test('interpretCommand 识别状态查询命令', () => {
   assert.deepEqual(interpretCommand('/status'), { name: 'queryStatus' });
 });
 
+test('interpretCommand 识别终止任务命令及其中文别名', () => {
+  assert.deepEqual(interpretCommand('/stop'), { name: 'stopTask' });
+  assert.deepEqual(interpretCommand('  /stop  '), { name: 'stopTask' });
+  assert.deepEqual(interpretCommand('停止任务'), { name: 'stopTask' });
+  assert.deepEqual(interpretCommand('终止任务'), { name: 'stopTask' });
+  assert.deepEqual(interpretCommand('暂停任务'), { name: 'stopTask' });
+});
+
 test('interpretCommand 识别会话恢复列表命令', () => {
   assert.deepEqual(interpretCommand('/resume'), { name: 'listResumableSessions' });
   assert.deepEqual(interpretCommand('  /resume  '), { name: 'listResumableSessions' });

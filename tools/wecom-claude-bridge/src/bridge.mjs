@@ -85,7 +85,7 @@ async function handleTextMessage(bridgeState, frame) {
 async function handleEnterChatEvent(bridgeState, frame) {
   await bridgeState.wsClientAdapter.replyWelcome(frame, {
     msgtype: 'text',
-    text: { content: '你好，我是 Claude 远程助手。直接发消息即可下达任务；6 小时内自动续聊，/resume 恢复历史会话，/new 重开，/cwd 切换目录，/status 查看队列。' },
+    text: { content: '你好，我是 Claude 远程助手。直接发消息即可下达任务；6 小时内自动续聊，/resume 恢复历史会话，/new 重开，/cwd 切换目录，/stop 终止运行中任务，/status 查看队列。' },
   });
 }
 
@@ -111,6 +111,12 @@ async function executeCommand(bridgeState, frame, command, chatIdentifier) {
 
   if (command.name === 'setWorkingDirectory') {
     await executeSetWorkingDirectoryCommand(bridgeState, frame, chatIdentifier, command.workingDirectory);
+
+    return;
+  }
+
+  if (command.name === 'stopTask') {
+    await executeStopTaskCommand(bridgeState, frame, chatIdentifier);
 
     return;
   }
@@ -200,6 +206,28 @@ async function executeSetWorkingDirectoryCommand(bridgeState, frame, chatIdentif
   await sendSingleReply(bridgeState, frame, `📁 工作目录已切换到 ${targetDirectory}，当前会话已重置（/resume 可找回）。`);
 }
 
+// /stop：优先终止运行中的任务；排队中的任务尚未开始、无法提前取消；空闲时如实相告。
+async function executeStopTaskCommand(bridgeState, frame, chatIdentifier) {
+  const activeTaskEntry = bridgeState.activeTasks.get(chatIdentifier);
+
+  if (activeTaskEntry?.stopFunction) {
+    activeTaskEntry.stopFunction();
+    await sendSingleReply(bridgeState, frame, '🛑 已发出终止信号，正在停止当前任务；终止前的产出会随后推送，会话保留、可直接继续。');
+
+    return;
+  }
+
+  const queueStatus = bridgeState.taskQueue.getStatus();
+
+  if (queueStatus.chatQueueLength(chatIdentifier) > 0) {
+    await sendSingleReply(bridgeState, frame, '⏳ 该会话的任务还在排队中（尚未开始执行），暂无法终止；等它开始后再发 /stop。');
+
+    return;
+  }
+
+  await sendSingleReply(bridgeState, frame, 'ℹ️ 当前没有运行中的任务。');
+}
+
 async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatIdentifier, messageContent) {
   const configuration = bridgeState.configuration;
   const record = bridgeState.sessionStore.getRecord(chatIdentifier);
@@ -207,7 +235,9 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
   const streamIdentifier = generateStreamIdentifier();
   const heartbeatMonitor = startHeartbeatMonitor(bridgeState, activeChatIdentifier);
 
-  bridgeState.activeTasks.set(chatIdentifier, activeChatIdentifier);
+  // stopFunction 由 runner 在子进程 spawn 后经 onStopReady 回填，/stop 命令据此终止任务。
+  const activeTaskEntry = { activeChatIdentifier, stopFunction: null };
+  bridgeState.activeTasks.set(chatIdentifier, activeTaskEntry);
 
   const reply = new ThrottledStreamReply({
     sendFunction: (content, finish) => bridgeState.wsClientAdapter.replyStream(frame, streamIdentifier, content, finish),
@@ -258,6 +288,9 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
       onProgressText: (progressText) => {
         heartbeatMonitor?.markProgress();
         reply.push(progressText);
+      },
+      onStopReady: (stopFunction) => {
+        activeTaskEntry.stopFunction = stopFunction;
       },
     });
 
@@ -342,7 +375,7 @@ async function shutdownBridge(bridgeState, shutdownOptions = {}) {
 
   const interruptedChatIdentifiers = [...bridgeState.activeTasks.keys()];
 
-  for (const [chatIdentifier, activeChatIdentifier] of bridgeState.activeTasks) {
+  for (const { activeChatIdentifier } of bridgeState.activeTasks.values()) {
     try {
       await bridgeState.wsClientAdapter.sendMessage(activeChatIdentifier, {
         msgtype: 'markdown',
@@ -356,13 +389,13 @@ async function shutdownBridge(bridgeState, shutdownOptions = {}) {
   return { idle: false, interruptedChatIdentifiers };
 }
 
-// 任务结束后的会话记录维护：失败自愈降级；成功则按「续接→刷新计时 / 全新→建立当前会话」落账。
+// 任务结束后的会话记录维护：失败自愈降级；手动终止视为有效产出，与成功同等落账；成功则按「续接→刷新计时 / 全新→建立当前会话」处理。
 function persistSessionAfterTask(bridgeState, chatIdentifier, { continuationEnabled, resumeSessionId, taskResult, messageContent }) {
   if (!continuationEnabled) {
     return;
   }
 
-  if (!taskResult.success) {
+  if (!taskResult.success && !taskResult.stopped) {
     bridgeState.sessionStore.demoteActiveSession(chatIdentifier);
 
     return;
@@ -383,7 +416,7 @@ function persistSessionAfterTask(bridgeState, chatIdentifier, { continuationEnab
 }
 
 function decorateTaskResultText(taskResult) {
-  const outcomeMarker = taskResult.success ? '✅' : taskResult.timedOut ? '⏱️' : '❌';
+  const outcomeMarker = taskResult.success ? '✅' : taskResult.stopped ? '🛑' : taskResult.timedOut ? '⏱️' : '❌';
   const durationSeconds = (taskResult.durationMilliseconds / 1000).toFixed(1);
   const costText = taskResult.costUsd != null ? ` · $${taskResult.costUsd.toFixed(4)}` : '';
 

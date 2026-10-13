@@ -10,6 +10,11 @@ export function interpretCommand(messageContent) {
     return { name: 'queryStatus' };
   }
 
+  // 「暂停/停止/终止任务」是用户催停时的自然说法，与 /stop 等价，避免被当成新任务执行。
+  if (trimmedContent === '/stop' || ['停止任务', '终止任务', '暂停任务'].includes(trimmedContent)) {
+    return { name: 'stopTask' };
+  }
+
   if (trimmedContent === '/resume') {
     return { name: 'listResumableSessions' };
   }

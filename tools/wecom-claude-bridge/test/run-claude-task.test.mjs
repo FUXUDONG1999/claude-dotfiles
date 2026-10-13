@@ -69,3 +69,33 @@ test('runClaudeTask 超时：SIGTERM 终止并标记 timedOut', async () => {
   assert.equal(taskResult.timedOut, true);
   assert.ok(taskResult.resultText.includes('超时'));
 });
+
+test('runClaudeTask 手动终止：onStopReady 交出句柄，调用后标记 stopped 并保留中间产出', async () => {
+  process.env.FAKE_CLAUDE_MODE = 'hang';
+
+  let stopFunction = null;
+  const taskResultPromise = runClaudeTask({
+    prompt: '挂起任务',
+    resumeSessionId: null,
+    workingDirectory: process.cwd(),
+    configuration: createConfiguration({ taskTimeoutMilliseconds: 10_000 }),
+    onProgressText: () => {},
+    onStopReady: (providedStopFunction) => {
+      stopFunction = providedStopFunction;
+    },
+  });
+
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+
+  assert.equal(typeof stopFunction, 'function');
+  stopFunction();
+
+  const taskResult = await taskResultPromise;
+
+  assert.equal(taskResult.success, false);
+  assert.equal(taskResult.stopped, true);
+  assert.equal(taskResult.timedOut, false);
+  assert.ok(taskResult.resultText.includes('手动终止'));
+  assert.ok(taskResult.resultText.includes('思考中'));
+  assert.equal(taskResult.sessionId, 'fake-session-hang');
+});

@@ -98,18 +98,30 @@ export function buildClaudeArguments({ prompt, resumeSessionId, permissionMode, 
 
 // 运行一次无头 Claude 任务。
 // 前置：configuration 已校验；工作目录存在。后置：resolve 出的任务结果总带有 resultText 与 success 标记，永不 reject。
+// onStopReady 在子进程 spawn 后同步回调，交出手动终止句柄（SIGTERM）；调用方可借此实现 /stop 类命令。
 export async function runClaudeTask(taskOptions) {
-  const { prompt, resumeSessionId, workingDirectory, configuration, onProgressText, onEvent } = taskOptions;
+  const { prompt, resumeSessionId, workingDirectory, configuration, onProgressText, onEvent, onStopReady } = taskOptions;
   const accumulator = new StreamJsonAccumulator();
   const startedAtMilliseconds = Date.now();
   let stderrText = '';
   let timedOut = false;
+  let stopped = false;
 
   const childProcess = spawn(
     configuration.claudeBinaryPath,
     buildClaudeArguments({ prompt, resumeSessionId, permissionMode: configuration.permissionMode, allowedTools: configuration.allowedTools }),
     { cwd: workingDirectory },
   );
+
+  onStopReady?.(() => {
+    // 进程已退出（含自然完成）时句柄失效，避免竞态下把正常结果改写成「手动终止」。
+    if (childProcess.exitCode !== null || childProcess.signalCode !== null || childProcess.killed) {
+      return;
+    }
+
+    stopped = true;
+    childProcess.kill('SIGTERM');
+  });
 
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
@@ -144,10 +156,10 @@ export async function runClaudeTask(taskOptions) {
   const exitCode = await closePromise;
   clearTimeout(timeoutHandle);
 
-  return buildTaskResult({ accumulator, exitCode, timedOut, stderrText, resumeSessionId, startedAtMilliseconds });
+  return buildTaskResult({ accumulator, exitCode, timedOut, stopped, stderrText, resumeSessionId, startedAtMilliseconds });
 }
 
-function buildTaskResult({ accumulator, exitCode, timedOut, stderrText, resumeSessionId, startedAtMilliseconds }) {
+function buildTaskResult({ accumulator, exitCode, timedOut, stopped, stderrText, resumeSessionId, startedAtMilliseconds }) {
   const completedEvent = accumulator.completedEvent;
   const durationMilliseconds = Date.now() - startedAtMilliseconds;
   const sessionId = completedEvent?.sessionId ?? accumulator.sessionId ?? resumeSessionId ?? null;
@@ -155,7 +167,12 @@ function buildTaskResult({ accumulator, exitCode, timedOut, stderrText, resumeSe
   let resultText;
   let success;
 
-  if (timedOut) {
+  if (stopped) {
+    const producedText = accumulator.accumulatedText || '（无中间产出）';
+
+    resultText = `任务已被手动终止（运行 ${Math.round(durationMilliseconds / 1000)} 秒）。终止前的产出：\n\n${producedText}`;
+    success = false;
+  } else if (timedOut) {
     const producedText = accumulator.accumulatedText || '（无中间产出）';
 
     resultText = `任务超时（${Math.round(durationMilliseconds / 1000)} 秒），已被终止。终止前的产出：\n\n${producedText}`;
@@ -180,6 +197,7 @@ function buildTaskResult({ accumulator, exitCode, timedOut, stderrText, resumeSe
     resultText,
     exitCode,
     timedOut,
+    stopped,
     costUsd: completedEvent?.costUsd ?? null,
     durationMilliseconds: completedEvent?.durationMilliseconds ?? durationMilliseconds,
   };

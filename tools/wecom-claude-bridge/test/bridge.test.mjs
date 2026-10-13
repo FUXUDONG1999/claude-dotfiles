@@ -28,6 +28,7 @@ function createBridgeFixture({
   chatSessionContinuationEnabled = false,
   heartbeatIntervalMilliseconds = 0,
   useRealTaskQueue = false,
+  maxConcurrentTasks = 3,
   claudeTaskRunner,
 } = {}) {
   const stateDirectory = mkdtempSync(join(tmpdir(), 'wecom-bridge-test-'));
@@ -49,7 +50,7 @@ function createBridgeFixture({
       hardDeadlineNoticeText: '任务仍在运行，完成后另行推送',
       heartbeatIntervalMilliseconds,
       drainTimeoutMilliseconds: 2_000,
-      maxConcurrentTasks: 3,
+      maxConcurrentTasks,
       logDirectory: join(stateDirectory, 'logs'),
     },
     wsClientAdapter: {
@@ -231,6 +232,140 @@ test('createBridge 任务失败时当前会话自愈降级进历史', async () =
       record.history.map((entry) => entry.sessionId),
       ['old-session'],
     );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+function createStoppedTaskResult() {
+  return {
+    success: false,
+    stopped: true,
+    timedOut: false,
+    sessionId: 'session-stopped',
+    resultText: '任务已被手动终止（运行 5 秒）。终止前的产出：\n\n部分产出',
+    costUsd: null,
+    durationMilliseconds: 5_000,
+    exitCode: null,
+  };
+}
+
+test('createBridge /stop 对运行中的任务发出终止信号并回复确认', async () => {
+  const fixture = createBridgeFixture({
+    useRealTaskQueue: true,
+    claudeTaskRunner: (runnerOptions) => new Promise((resolveTask) => {
+      // 模拟真实 runner 契约：注册终止句柄，被调用时进程退出并产出 stopped 结果。
+      // 2 秒安全兜底：/stop 未生效（回归）时也让任务收尾，避免悬挂定时器拖住测试进程。
+      const safetyTimer = setTimeout(() => resolveTask(createStoppedTaskResult()), 2_000);
+      runnerOptions.onStopReady(() => {
+        clearTimeout(safetyTimer);
+        resolveTask(createStoppedTaskResult());
+      });
+    }),
+  });
+
+  try {
+    const handlePromise = fixture.bridge.handleTextMessage(createTextFrame({ content: '跑偏的任务' }));
+
+    await waitForBridgeCondition(() => fixture.bridge.taskQueue.getStatus().runningCount === 1);
+
+    await fixture.bridge.handleTextMessage(createTextFrame({ content: '/stop' }));
+
+    assert.ok(allRepliedTextOf(fixture).includes('终止信号'), `期望包含终止信号确认，实际回复：${allRepliedTextOf(fixture)}`);
+
+    await handlePromise;
+
+    const finishFrames = finishFramesOf(fixture);
+    assert.ok(finishFrames.some((frame) => frame.content.includes('手动终止')));
+    assert.ok(finishFrames.some((frame) => frame.content.includes('🛑')));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge /stop 空闲时回复没有运行中的任务', async () => {
+  const fixture = createBridgeFixture();
+
+  try {
+    await fixture.bridge.handleTextMessage(createTextFrame({ content: '/stop' }));
+
+    assert.ok(allRepliedTextOf(fixture).includes('没有运行中的任务'));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge /stop 对排队中（尚未开始）的任务提示无法提前终止', async () => {
+  let releaseBlockingTask;
+  const fixture = createBridgeFixture({
+    useRealTaskQueue: true,
+    maxConcurrentTasks: 1,
+    claudeTaskRunner: (runnerOptions) => {
+      if (runnerOptions.prompt === '占用槽位的任务') {
+        return new Promise((resolveTask) => {
+          releaseBlockingTask = resolveTask;
+        });
+      }
+
+      return Promise.resolve(createBlockingTaskResult());
+    },
+  });
+
+  try {
+    const blockingHandlePromise = fixture.bridge.handleTextMessage(
+      createTextFrame({ chatId: 'room-a', content: '占用槽位的任务' }),
+    );
+
+    await waitForBridgeCondition(() => fixture.bridge.taskQueue.getStatus().runningCount === 1);
+
+    // B 的消息入队但不 await：enqueue 返回的 Promise 要等任务真正跑完才会 resolve
+    const queuedHandlePromise = fixture.bridge.handleTextMessage(createTextFrame({ chatId: 'room-b', content: '排队任务' }));
+
+    await waitForBridgeCondition(() => fixture.bridge.taskQueue.getStatus().chatQueueLength('room-b') === 1);
+
+    await fixture.bridge.handleTextMessage(createTextFrame({ chatId: 'room-b', content: '/stop' }));
+
+    assert.ok(allRepliedTextOf(fixture).includes('尚未开始'), `期望包含排队提示，实际回复：${allRepliedTextOf(fixture)}`);
+
+    releaseBlockingTask(createBlockingTaskResult());
+    await blockingHandlePromise;
+    await queuedHandlePromise;
+  } finally {
+    releaseBlockingTask?.(createBlockingTaskResult());
+    fixture.cleanup();
+  }
+});
+
+test('createBridge 手动终止的任务不降级当前会话（续接场景）', async () => {
+  const fixture = createBridgeFixture({
+    chatSessionContinuationEnabled: true,
+    claudeTaskRunner: async () => createStoppedTaskResult(),
+  });
+
+  try {
+    fixture.sessionStore.activateSession('single:dong', { sessionId: 'old-session', firstPrompt: '旧问题' });
+    await fixture.bridge.handleTextMessage(createTextFrame({ content: '跑偏的任务' }));
+
+    const record = fixture.sessionStore.getRecord('single:dong');
+    assert.equal(record.active.sessionId, 'old-session');
+    assert.deepEqual(record.history, []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('createBridge 手动终止的任务仍建立当前会话（新会话场景）', async () => {
+  const fixture = createBridgeFixture({
+    chatSessionContinuationEnabled: true,
+    claudeTaskRunner: async () => createStoppedTaskResult(),
+  });
+
+  try {
+    await fixture.bridge.handleTextMessage(createTextFrame({ content: '跑偏的任务' }));
+
+    const record = fixture.sessionStore.getRecord('single:dong');
+    assert.equal(record.active.sessionId, 'session-stopped');
+    assert.equal(record.active.firstPrompt, '跑偏的任务');
   } finally {
     fixture.cleanup();
   }
