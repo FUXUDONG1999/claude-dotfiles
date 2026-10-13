@@ -72,14 +72,26 @@ async function handleTextMessage(bridgeState, frame) {
 async function handleEnterChatEvent(bridgeState, frame) {
   await bridgeState.wsClientAdapter.replyWelcome(frame, {
     msgtype: 'text',
-    text: { content: '你好，我是 Claude 远程助手。直接发消息即可下达任务；/new 重开会话，/cwd 切换目录，/status 查看队列。' },
+    text: { content: '你好，我是 Claude 远程助手。直接发消息即可下达任务；6 小时内自动续聊，/resume 恢复历史会话，/new 重开，/cwd 切换目录，/status 查看队列。' },
   });
 }
 
 async function executeCommand(bridgeState, frame, command, chatIdentifier) {
   if (command.name === 'resetSession') {
-    bridgeState.sessionStore.removeSession(chatIdentifier);
-    await sendSingleReply(bridgeState, frame, '🆕 已开启新会话，下一条消息将从全新 Claude 会话开始。');
+    bridgeState.sessionStore.demoteActiveSession(chatIdentifier);
+    await sendSingleReply(bridgeState, frame, '🆕 已开启新会话；上一会话已存入历史，发 /resume 可找回。');
+
+    return;
+  }
+
+  if (command.name === 'listResumableSessions') {
+    await executeResumeListCommand(bridgeState, frame, chatIdentifier);
+
+    return;
+  }
+
+  if (command.name === 'selectResumableSession') {
+    await executeResumeSelectCommand(bridgeState, frame, chatIdentifier, command.index);
 
     return;
   }
@@ -100,6 +112,68 @@ async function executeCommand(bridgeState, frame, command, chatIdentifier) {
   }
 }
 
+async function executeResumeListCommand(bridgeState, frame, chatIdentifier) {
+  const configuration = bridgeState.configuration;
+  bridgeState.sessionStore.resolveActiveSession(chatIdentifier, configuration.sessionTtlMilliseconds);
+
+  const record = bridgeState.sessionStore.getRecord(chatIdentifier);
+  const activeSession = record?.active ?? null;
+  const history = record?.history ?? [];
+
+  if (!activeSession && history.length === 0) {
+    await sendSingleReply(bridgeState, frame, '📭 暂无可恢复的会话，先发条消息开始对话吧。');
+
+    return;
+  }
+
+  const lines = ['📖 可恢复的历史会话（发送 /resume 序号 恢复）：'];
+
+  if (activeSession) {
+    lines.push(`🔵 当前会话：首问「${activeSession.firstPrompt ?? '（未知）'}」 · 自动续聊中`);
+  }
+
+  history.forEach((entry, index) => {
+    lines.push(`${index + 1}. 首问「${entry.firstPrompt ?? '（未知）'}」 · ${formatRelativeTime(entry.endedAt)}`);
+  });
+
+  if (history.length === 0) {
+    lines.push('（暂无历史会话）');
+  }
+
+  await sendSingleReply(bridgeState, frame, lines.join('\n'));
+}
+
+async function executeResumeSelectCommand(bridgeState, frame, chatIdentifier, index) {
+  const configuration = bridgeState.configuration;
+  bridgeState.sessionStore.resolveActiveSession(chatIdentifier, configuration.sessionTtlMilliseconds);
+
+  const history = bridgeState.sessionStore.getRecord(chatIdentifier)?.history ?? [];
+
+  if (history.length === 0) {
+    await sendSingleReply(bridgeState, frame, '❌ 暂无可恢复的历史会话。');
+
+    return;
+  }
+
+  const selectedEntry = history[index - 1];
+
+  if (!selectedEntry) {
+    await sendSingleReply(bridgeState, frame, `❌ 序号超出范围（现有 ${history.length} 条），发 /resume 查看列表。`);
+
+    return;
+  }
+
+  bridgeState.sessionStore.activateSession(chatIdentifier, {
+    sessionId: selectedEntry.sessionId,
+    firstPrompt: selectedEntry.firstPrompt ?? '',
+  });
+  await sendSingleReply(
+    bridgeState,
+    frame,
+    `↩️ 已恢复会话 ${index}（首问「${selectedEntry.firstPrompt ?? '（未知）'}」）。直接发消息继续，闲置计时已重置。`,
+  );
+}
+
 async function executeSetWorkingDirectoryCommand(bridgeState, frame, chatIdentifier, requestedDirectory) {
   const targetDirectory = resolve(requestedDirectory);
 
@@ -109,14 +183,14 @@ async function executeSetWorkingDirectoryCommand(bridgeState, frame, chatIdentif
     return;
   }
 
-  bridgeState.sessionStore.saveSession(chatIdentifier, { sessionId: null, workingDirectory: targetDirectory });
-  await sendSingleReply(bridgeState, frame, `📁 工作目录已切换到 ${targetDirectory}，会话已重置。`);
+  bridgeState.sessionStore.setWorkingDirectory(chatIdentifier, targetDirectory);
+  await sendSingleReply(bridgeState, frame, `📁 工作目录已切换到 ${targetDirectory}，当前会话已重置（/resume 可找回）。`);
 }
 
 async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatIdentifier, messageContent) {
   const configuration = bridgeState.configuration;
-  const storedSession = bridgeState.sessionStore.getSession(chatIdentifier);
-  const workingDirectory = storedSession?.workingDirectory ?? configuration.defaultWorkingDirectory;
+  const record = bridgeState.sessionStore.getRecord(chatIdentifier);
+  const workingDirectory = record?.workingDirectory ?? configuration.defaultWorkingDirectory;
   const streamIdentifier = generateStreamIdentifier();
 
   const reply = new ThrottledStreamReply({
@@ -131,10 +205,27 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
     }),
   });
 
-  reply.push('⏳ 已接收任务，Claude 开始执行…');
-
   const continuationEnabled = configuration.chatSessionContinuationEnabled;
-  const resumeSessionId = continuationEnabled ? storedSession?.sessionId ?? null : null;
+  let resumeSessionId = null;
+  let expiryNoticeText = null;
+
+  if (continuationEnabled) {
+    const resolvedSession = bridgeState.sessionStore.resolveActiveSession(
+      chatIdentifier,
+      configuration.sessionTtlMilliseconds,
+    );
+
+    if (resolvedSession.sessionId) {
+      resumeSessionId = resolvedSession.sessionId;
+    } else if (resolvedSession.expiredJustNow) {
+      expiryNoticeText = `⏱️ 上次会话已闲置超过 ${formatHours(configuration.sessionTtlMilliseconds)} 小时，本轮从新会话开始；发 /resume 可恢复历史会话。`;
+    }
+  }
+
+  // 提示须并入首条推送：push 是覆盖语义，单独推送会被紧随的进度文本顶掉。
+  reply.push(
+    expiryNoticeText ? `⏳ 已接收任务，Claude 开始执行…\n\n${expiryNoticeText}` : '⏳ 已接收任务，Claude 开始执行…',
+  );
 
   try {
     const taskRunner = bridgeState.dependencies.claudeTaskRunner ?? runClaudeTask;
@@ -152,12 +243,12 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
     });
 
     await reply.finish(decorateTaskResultText(taskResult));
-
-    if (continuationEnabled && taskResult.sessionId) {
-      bridgeState.sessionStore.saveSession(chatIdentifier, { sessionId: taskResult.sessionId, workingDirectory });
-    } else {
-      bridgeState.sessionStore.saveSession(chatIdentifier, { sessionId: null, workingDirectory });
-    }
+    persistSessionAfterTask(bridgeState, chatIdentifier, {
+      continuationEnabled,
+      resumeSessionId,
+      taskResult,
+      messageContent,
+    });
 
     await bridgeState.logWriter.appendTaskRecord({
       messageId: frame.body?.msgid,
@@ -167,7 +258,34 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
     });
   } catch (error) {
     bridgeState.logger.error('任务执行异常', error);
+    bridgeState.sessionStore.demoteActiveSession(chatIdentifier);
     await reply.finish(`❌ 任务执行异常：${error.message}`);
+  }
+}
+
+// 任务结束后的会话记录维护：失败自愈降级；成功则按「续接→刷新计时 / 全新→建立当前会话」落账。
+function persistSessionAfterTask(bridgeState, chatIdentifier, { continuationEnabled, resumeSessionId, taskResult, messageContent }) {
+  if (!continuationEnabled) {
+    return;
+  }
+
+  if (!taskResult.success) {
+    bridgeState.sessionStore.demoteActiveSession(chatIdentifier);
+
+    return;
+  }
+
+  if (resumeSessionId) {
+    bridgeState.sessionStore.touchActiveSession(chatIdentifier);
+
+    return;
+  }
+
+  if (taskResult.sessionId) {
+    bridgeState.sessionStore.activateSession(chatIdentifier, {
+      sessionId: taskResult.sessionId,
+      firstPrompt: messageContent,
+    });
   }
 }
 
@@ -177,6 +295,37 @@ function decorateTaskResultText(taskResult) {
   const costText = taskResult.costUsd != null ? ` · $${taskResult.costUsd.toFixed(4)}` : '';
 
   return `${taskResult.resultText}\n\n---\n${outcomeMarker} 耗时 ${durationSeconds}s${costText}`;
+}
+
+function formatHours(milliseconds) {
+  const hours = milliseconds / 3600_000;
+
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+}
+
+function formatRelativeTime(timestamp) {
+  if (!timestamp) {
+    return '时间未知';
+  }
+
+  const elapsedMilliseconds = Date.now() - timestamp;
+  const elapsedMinutes = Math.round(elapsedMilliseconds / 60_000);
+
+  if (elapsedMinutes < 1) {
+    return '刚刚';
+  }
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} 分钟前`;
+  }
+
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+
+  if (elapsedHours < 24) {
+    return `${elapsedHours} 小时前`;
+  }
+
+  return `${Math.round(elapsedHours / 24)} 天前`;
 }
 
 async function sendSingleReply(bridgeState, frame, content) {

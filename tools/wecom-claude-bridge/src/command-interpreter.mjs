@@ -10,6 +10,16 @@ export function interpretCommand(messageContent) {
     return { name: 'queryStatus' };
   }
 
+  if (trimmedContent === '/resume') {
+    return { name: 'listResumableSessions' };
+  }
+
+  const resumeSelectionMatch = trimmedContent.match(/^\/resume\s+([1-9]\d*)$/);
+
+  if (resumeSelectionMatch) {
+    return { name: 'selectResumableSession', index: Number(resumeSelectionMatch[1]) };
+  }
+
   const workingDirectoryMatch = trimmedContent.match(/^\/cwd\s+(.+)$/);
 
   if (workingDirectoryMatch) {

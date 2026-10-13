@@ -38,6 +38,7 @@ export function loadConfiguration(environment = process.env) {
     streamHardDeadlineMilliseconds: readPositiveNumber(mergedEnvironment.STREAM_HARD_DEADLINE_MILLISECONDS, 300_000),
     maxConcurrentTasks: readPositiveNumber(mergedEnvironment.MAX_CONCURRENT_TASKS, 3),
     chatSessionContinuationEnabled: mergedEnvironment.CONTINUE_SESSION_PER_CHAT === 'true',
+    sessionTtlMilliseconds: readPositiveNumber(mergedEnvironment.SESSION_TTL_HOURS, 6) * 3600_000,
     stateDirectory,
     logDirectory,
     hardDeadlineNoticeText: '任务仍在运行（超过企微流式时间限制）',

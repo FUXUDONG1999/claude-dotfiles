@@ -62,6 +62,7 @@ STREAM_INTERVAL_MILLISECONDS=2000
 STREAM_HARD_DEADLINE_MILLISECONDS=300000
 MAX_CONCURRENT_TASKS=3
 CONTINUE_SESSION_PER_CHAT=false
+SESSION_TTL_HOURS=6
 STATE_DIRECTORY=./state
 LOG_DIRECTORY=./logs
 ```
@@ -96,11 +97,13 @@ journalctl -u wecom-claude-bridge -f   # 看日志
 
 直接给机器人发消息即下达任务（单聊、群聊 @机器人 均可，群聊同样校验发送者白名单）。
 
-**会话策略**：默认**每条消息都开全新 Claude 会话**（无上下文续接）。如需同一会话续接上下文，在 `.env` 中设置 `CONTINUE_SESSION_PER_CHAT=true`。
+**会话策略**：默认**每条消息都开全新 Claude 会话**（无上下文续接）。如需同一会话续接上下文，在 `.env` 中设置 `CONTINUE_SESSION_PER_CHAT=true`，此时同一企微会话（单聊或同群）闲置 `SESSION_TTL_HOURS`（默认 6 小时）内自动续聊；超时后自动开新会话并提示，最近 5 个历史会话可用 `/resume` 找回。任务失败/超时的会话也会自动转入历史（避免失效 sessionId 卡死当前会话）。
 
 | 命令 | 作用 |
 | --- | --- |
-| `/new` | 重开全新 Claude 会话 |
+| `/new` | 重开全新 Claude 会话（旧会话转入历史，可 `/resume` 找回） |
+| `/resume` | 列出可恢复的历史会话（首问摘要 + 时间） |
+| `/resume <序号>` | 恢复指定历史会话为当前会话，闲置计时重置 |
 | `/cwd <绝对路径>` | 切换 Claude 的工作目录（会重置会话） |
 | `/status` | 查看运行中与排队中的任务数 |
 
