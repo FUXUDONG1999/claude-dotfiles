@@ -12,7 +12,8 @@ skills 等内容的日常开发在 `~/.claude/` 进行，本仓库定期同步�
 | `skills/ai-mentor/` | 自定义 skill：AI 导师（费曼式教学课件生成） | `~/.claude/skills/ai-mentor/` |
 | `skills/code-refactoring/` | 自定义 skill：代码抽象与重构工程方法论 | `~/.claude/skills/code-refactoring/` |
 | `mcp/mcp-servers.json` | MCP 服务器配置（从 `~/.claude.json` 的 `mcpServers` 字段提取） | 合并回 `~/.claude.json` 的 `mcpServers` 字段 |
-| `config/CLAUDE.md` | 全局指令（图片处理规则：强制使用智谱 MCP 视觉工具） | `~/.claude/CLAUDE.md` |
+| `config/CLAUDE.md` | 全局指令：引用 `rules/` 下的编码 / 架构 / 排查规则，内联图片处理规则（强制使用智谱 MCP 视觉工具） | `~/.claude/CLAUDE.md` |
+| `config/rules/` | `CLAUDE.md` 通过 `@` 引用的规则全文：代码编写规范、代码架构规则、问题排查优先使用 codegraph | `~/.claude/rules/` |
 | `config/settings.json` | 主设置：环境变量、模型映射（GLM）、权限黑白名单、主题、状态栏 | `~/.claude/settings.json` |
 | `config/settings.local.json` | 本地权限补充 | `~/.claude/settings.local.json` |
 
@@ -31,6 +32,8 @@ skills 等内容的日常开发在 `~/.claude/` 进行，本仓库定期同步�
 
 ```bash
 cp config/CLAUDE.md config/settings.json config/settings.local.json ~/.claude/
+mkdir -p ~/.claude/rules && cp config/rules/*.md ~/.claude/rules/
+# CLAUDE.md 中的 @ 引用是绝对路径 /Users/fuxudong/.claude/rules/...，换用户名时需同步修改
 cp -r skills/. ~/.claude/skills/
 bash tools/statusline/install.sh    # 状态栏三件套 + settings 合并
 # mcp/mcp-servers.json 需手动合并进 ~/.claude.json 的 "mcpServers" 字段
@@ -43,6 +46,7 @@ bash tools/statusline/install.sh    # 状态栏三件套 + settings 合并
 
 ```bash
 cp ~/.claude/CLAUDE.md config/
+mkdir -p config/rules && cp ~/.claude/rules/*.md config/rules/
 cp ~/.claude/settings.json ~/.claude/settings.local.json config/
 cp -r ~/.claude/skills/ai-mentor ~/.claude/skills/code-refactoring skills/
 # mcp-servers.json 从 ~/.claude.json 的 mcpServers 字段重新提取
