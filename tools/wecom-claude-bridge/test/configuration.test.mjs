@@ -13,6 +13,14 @@ const BASE_ENVIRONMENT = {
   DEFAULT_WORKING_DIRECTORY: '/tmp',
 };
 
+test('loadConfiguration 的任务时限默认 2 小时，TASK_TIMEOUT_MINUTES 可覆盖', () => {
+  const defaultConfiguration = loadConfiguration({ ...BASE_ENVIRONMENT });
+  const overriddenConfiguration = loadConfiguration({ ...BASE_ENVIRONMENT, TASK_TIMEOUT_MINUTES: '15' });
+
+  assert.equal(defaultConfiguration.taskTimeoutMilliseconds, 120 * 60_000);
+  assert.equal(overriddenConfiguration.taskTimeoutMilliseconds, 15 * 60_000);
+});
+
 test('loadConfiguration 将 SESSION_TTL_HOURS 换算为毫秒', () => {
   const configuration = loadConfiguration({ ...BASE_ENVIRONMENT, SESSION_TTL_HOURS: '2' });
 

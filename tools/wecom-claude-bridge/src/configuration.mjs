@@ -36,7 +36,7 @@ export function loadConfiguration(environment = process.env) {
     claudeBinaryPath: mergedEnvironment.CLAUDE_BINARY_PATH ?? 'claude',
     permissionMode: mergedEnvironment.PERMISSION_MODE ?? 'acceptEdits',
     allowedTools: splitCommaSeparated(mergedEnvironment.ALLOWED_TOOLS ?? ''),
-    taskTimeoutMilliseconds: readPositiveNumber(mergedEnvironment.TASK_TIMEOUT_MINUTES, 30) * 60_000,
+    taskTimeoutMilliseconds: readPositiveNumber(mergedEnvironment.TASK_TIMEOUT_MINUTES, 120) * 60_000,
     streamIntervalMilliseconds: readPositiveNumber(mergedEnvironment.STREAM_INTERVAL_MILLISECONDS, 2000),
     streamHardDeadlineMilliseconds: readPositiveNumber(mergedEnvironment.STREAM_HARD_DEADLINE_MILLISECONDS, 300_000),
     maxConcurrentTasks: readPositiveNumber(mergedEnvironment.MAX_CONCURRENT_TASKS, 3),
