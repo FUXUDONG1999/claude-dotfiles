@@ -11,7 +11,11 @@ async function main() {
     writeLine({ type: 'system', subtype: 'init', session_id: 'fake-session-001' });
     writeLine({ type: 'assistant', message: { content: [{ type: 'text', text: '先分析依赖。' }] } });
     await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 60));
-    writeLine({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } });
+    writeLine({ type: 'assistant', message: { content: [
+      { type: 'thinking', thinking: '先跑一遍测试确认现状。' },
+      { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test' } },
+    ] } });
+    writeLine({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: '3 passing', is_error: false }] } });
     writeLine({ type: 'assistant', message: { content: [{ type: 'text', text: '测试通过，修复完成。' }] } });
     writeLine({
       type: 'result',

@@ -1,12 +1,17 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
+import { extractToolDigest, renderProgressMarkdown } from './progress-view.mjs';
+
 // 解析 claude -p --output-format stream-json 的逐行 NDJSON 输出。
 // 每个任务实例化一个，执行状态隔离在实例上，不设全局可变状态。
+// 除累计文本外，还维护「当前思考 + 工具调用时间线」快照，供渲染进度帧。
 export class StreamJsonAccumulator {
   constructor() {
     this.sessionId = null;
     this.accumulatedText = '';
+    this.currentThinkingText = '';
+    this.toolEntries = [];
     this.completedEvent = null;
   }
 
@@ -35,6 +40,10 @@ export class StreamJsonAccumulator {
       return this.consumeAssistantMessage(parsedFrame.message);
     }
 
+    if (parsedFrame.type === 'user') {
+      return this.consumeToolResults(parsedFrame.message);
+    }
+
     if (parsedFrame.type === 'result') {
       this.completedEvent = {
         type: 'completed',
@@ -53,22 +62,67 @@ export class StreamJsonAccumulator {
 
   consumeAssistantMessage(assistantMessage) {
     const contentBlocks = assistantMessage?.content ?? [];
+    let stateChanged = false;
+
+    for (const block of contentBlocks) {
+      if (block.type === 'thinking' && block.thinking) {
+        this.currentThinkingText = block.thinking;
+        stateChanged = true;
+      } else if (block.type === 'tool_use') {
+        this.toolEntries.push({
+          toolUseId: block.id ?? null,
+          name: block.name,
+          digest: extractToolDigest(block.name, block.input),
+          status: 'pending',
+        });
+        stateChanged = true;
+      }
+    }
+
     const textBlocks = contentBlocks.filter((block) => block.type === 'text').map((block) => block.text);
 
-    if (textBlocks.length === 0) {
-      const toolUseBlock = contentBlocks.find((block) => block.type === 'tool_use');
+    if (textBlocks.length > 0) {
+      if (this.accumulatedText) {
+        this.accumulatedText += '\n\n';
+      }
+      this.accumulatedText += textBlocks.join('\n\n');
+      stateChanged = true;
+    }
 
-      return toolUseBlock
-        ? { type: 'assistant_activity', description: toolUseBlock.name }
+    return stateChanged ? { type: 'progress', snapshot: this.buildSnapshot() } : null;
+  }
+
+  consumeToolResults(userMessage) {
+    const toolResultBlocks = (userMessage?.content ?? []).filter((block) => block.type === 'tool_result');
+
+    if (toolResultBlocks.length === 0) {
+      return null;
+    }
+
+    let matchedAnyTool = false;
+
+    for (const block of toolResultBlocks) {
+      const matchingEntry = block.tool_use_id != null
+        ? this.toolEntries.find((entry) => entry.toolUseId === block.tool_use_id)
         : null;
+
+      if (!matchingEntry) {
+        continue;
+      }
+
+      matchingEntry.status = block.is_error === true ? 'error' : 'ok';
+      matchedAnyTool = true;
     }
 
-    if (this.accumulatedText) {
-      this.accumulatedText += '\n\n';
-    }
-    this.accumulatedText += textBlocks.join('\n\n');
+    return matchedAnyTool ? { type: 'progress', snapshot: this.buildSnapshot() } : null;
+  }
 
-    return { type: 'progress', text: this.accumulatedText };
+  buildSnapshot() {
+    return {
+      thinkingText: this.currentThinkingText,
+      toolEntries: this.toolEntries.map((entry) => ({ ...entry })),
+      text: this.accumulatedText,
+    };
   }
 }
 
@@ -143,7 +197,8 @@ export async function runClaudeTask(taskOptions) {
     }
 
     if (event.type === 'progress') {
-      onProgressText?.(event.text);
+      const elapsedSeconds = Math.max(0, Math.round((Date.now() - startedAtMilliseconds) / 1000));
+      onProgressText?.(renderProgressMarkdown(event.snapshot, elapsedSeconds));
     }
 
     onEvent?.(event);

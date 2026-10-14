@@ -17,8 +17,8 @@ wss://openws.work.weixin.qq.com（企微官方长连接）
    ▼
 bridge（Node.js ≥18，与 claude 同机，systemd 常驻）
    │ 白名单校验 → 会话队列 → claude -p 子进程
-   │ stream-json 增量 → 节流流式回推（finish=false）
-   │ result → 收尾推送（finish=true）
+   │ stream-json 增量（思考/工具调用/文本）→ 渲染进度帧 → 节流流式回推（finish=false）
+   │ result → 收尾推送（finish=true，只含最终结果）
    ▼
 Claude Code 无头模式（操作服务器上的项目目录）
 ```
@@ -122,6 +122,7 @@ journalctl -u wecom-claude-bridge -f   # 看日志
 | 流式回复须 6 分钟内结束 | 默认 5 分钟收尾并提示「仍在运行」；任务完成后经主动推送送达 |
 | 单条内容 20480 字节上限 | 超限自动截断，全文落盘 `logs/` 目录 |
 | 推送频率 30 条/分钟 | 进度按 `STREAM_INTERVAL_MILLISECONDS` 节流 |
+| content 含 `<think></think>` 时客户端展示为思考过程 | 进度帧把模型思考包进该标签，工具调用渲染为带状态的时间线（最近 5 条） |
 
 ## 安全
 
@@ -132,7 +133,7 @@ journalctl -u wecom-claude-bridge -f   # 看日志
 ## 开发
 
 ```bash
-npm test    # node:test，28 个用例（解析器/队列/节流/组装层/集成）
+npm test    # node:test，84 个用例（解析器/进度渲染/队列/节流/组装层/集成）
 ```
 
-模块职责：`configuration`（配置加载校验）· `claude-runner`（stream-json 解析 + 子进程）· `task-queue`（会话串行 + 全局并发）· `wecom-channel`（节流流式回复 + 硬截止兜底 + 截断）· `session-store`（chatid→session 映射持久化）· `command-interpreter`（斜杠命令）· `bridge`（组装层）· `main`（入口）。
+模块职责：`configuration`（配置加载校验）· `claude-runner`（stream-json 解析 + 子进程）· `progress-view`（思考/工具时间线 → 企微进度帧 markdown）· `task-queue`（会话串行 + 全局并发）· `wecom-channel`（节流流式回复 + 硬截止兜底 + 截断）· `session-store`（chatid→session 映射持久化）· `command-interpreter`（斜杠命令）· `bridge`（组装层）· `main`（入口）。

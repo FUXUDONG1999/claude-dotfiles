@@ -36,6 +36,12 @@ test('runClaudeTask 正常路径：进度回调、最终结果与元数据齐全
   assert.equal(taskResult.costUsd, 0.02);
   assert.ok(progressTexts.length >= 2);
   assert.ok(progressTexts.at(-1).includes('测试通过，修复完成。'));
+  // 进度帧是渲染后的 markdown 视图：思考进 <think>、工具带摘要与状态、正文在分隔线后。
+  assert.ok(progressTexts.some((frame) => frame.includes('<think>\n先跑一遍测试确认现状。\n</think>')));
+  assert.ok(progressTexts.some((frame) => frame.includes('⏳ 进行中 ·')));
+  assert.ok(progressTexts.some((frame) => frame.includes('🔧 **Bash** `npm test` ⏳')));
+  assert.ok(progressTexts.some((frame) => frame.includes('🔧 **Bash** `npm test` ✅')));
+  assert.ok(progressTexts.some((frame) => frame.includes('---\n先分析依赖。')));
 });
 
 test('runClaudeTask 进程失败：返回 stderr 且标记失败', async () => {
