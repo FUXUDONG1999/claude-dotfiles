@@ -69,6 +69,13 @@ STATE_DIRECTORY=./state
 LOG_DIRECTORY=./logs
 ```
 
+### 启动提速（可选但推荐）
+
+无头任务默认会连上你**全局**配置的全部 MCP 服务器并执行全局 hooks（如 SessionStart 注入），冷启动实测从 ~3s 膨胀到 ~15s。两项治理配置：
+
+- **`mcp-servers.json`**（项目根，模板见 `mcp-servers.example.json`，含密钥已 gitignore）：存在即启用 `--strict-mcp-config --mcp-config`，桥接任务只加载文件里列出的 MCP。用 `MCP_SERVERS_FILE` 可改路径，删掉文件即恢复全局加载。
+- **`DISABLE_ALL_HOOKS`**（默认 `true`）：给桥接任务注入 `--settings '{"disableAllHooks":true}'`，跳过全局 hooks；用户级 skills（如 ai-mentor）不受影响。设 `false` 恢复。
+
 ### systemd 常驻
 
 `/etc/systemd/system/wecom-claude-bridge.service`：

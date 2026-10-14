@@ -126,7 +126,7 @@ export class StreamJsonAccumulator {
   }
 }
 
-export function buildClaudeArguments({ prompt, resumeSessionId, permissionMode, allowedTools }) {
+export function buildClaudeArguments({ prompt, resumeSessionId, permissionMode, allowedTools, mcpServersFile, disableAllHooks }) {
   const arguments_ = [
     '-p',
     prompt,
@@ -134,6 +134,14 @@ export function buildClaudeArguments({ prompt, resumeSessionId, permissionMode, 
     'stream-json',
     '--verbose',
   ];
+
+  if (mcpServersFile) {
+    arguments_.push('--strict-mcp-config', '--mcp-config', mcpServersFile);
+  }
+
+  if (disableAllHooks) {
+    arguments_.push('--settings', '{"disableAllHooks":true}');
+  }
 
   if (resumeSessionId) {
     arguments_.push('--resume', resumeSessionId);
@@ -163,7 +171,14 @@ export async function runClaudeTask(taskOptions) {
 
   const childProcess = spawn(
     configuration.claudeBinaryPath,
-    buildClaudeArguments({ prompt, resumeSessionId, permissionMode: configuration.permissionMode, allowedTools: configuration.allowedTools }),
+    buildClaudeArguments({
+      prompt,
+      resumeSessionId,
+      permissionMode: configuration.permissionMode,
+      allowedTools: configuration.allowedTools,
+      mcpServersFile: configuration.mcpServersFile,
+      disableAllHooks: configuration.disableAllHooks,
+    }),
     { cwd: workingDirectory },
   );
 

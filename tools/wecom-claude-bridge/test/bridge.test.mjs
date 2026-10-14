@@ -51,6 +51,8 @@ function createBridgeFixture({
       heartbeatIntervalMilliseconds,
       drainTimeoutMilliseconds: 2_000,
       maxConcurrentTasks,
+      mcpServersFile: '/tmp/bridge-mcp.json',
+      disableAllHooks: true,
       logDirectory: join(stateDirectory, 'logs'),
     },
     wsClientAdapter: {
@@ -149,6 +151,8 @@ test('createBridge 正常任务：流式进度 + finish 收尾；续接开关关
     assert.equal(fixture.sessionStore.getRecord('single:dong'), null);
     assert.equal(fixture.capturedRunnerOptions[0].resumeSessionId, null);
     assert.equal(fixture.capturedRunnerOptions[0].workingDirectory, '/tmp');
+    assert.equal(fixture.capturedRunnerOptions[0].configuration.mcpServersFile, '/tmp/bridge-mcp.json');
+    assert.equal(fixture.capturedRunnerOptions[0].configuration.disableAllHooks, true);
   } finally {
     fixture.cleanup();
   }

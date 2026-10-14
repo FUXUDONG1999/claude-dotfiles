@@ -284,6 +284,8 @@ async function executeClaudeTask(bridgeState, frame, chatIdentifier, activeChatI
         permissionMode: configuration.permissionMode,
         allowedTools: configuration.allowedTools,
         taskTimeoutMilliseconds: configuration.taskTimeoutMilliseconds,
+        mcpServersFile: configuration.mcpServersFile,
+        disableAllHooks: configuration.disableAllHooks,
       },
       onProgressText: (progressText) => {
         heartbeatMonitor?.markProgress();

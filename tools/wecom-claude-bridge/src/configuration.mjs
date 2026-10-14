@@ -21,6 +21,9 @@ export function loadConfiguration(environment = process.env) {
 
   const stateDirectory = resolve(mergedEnvironment.STATE_DIRECTORY ?? './state');
   const logDirectory = resolve(mergedEnvironment.LOG_DIRECTORY ?? './logs');
+  // 桥接任务专用 MCP 白名单文件（含密钥，gitignore）：存在则启用严格 MCP 模式，砍掉全局 MCP 的启动开销。
+  const mcpServersFileCandidate = resolve(mergedEnvironment.MCP_SERVERS_FILE ?? './mcp-servers.json');
+  const mcpServersFile = existsSync(mcpServersFileCandidate) ? mcpServersFileCandidate : null;
 
   mkdirSync(stateDirectory, { recursive: true });
   mkdirSync(logDirectory, { recursive: true });
@@ -41,6 +44,9 @@ export function loadConfiguration(environment = process.env) {
     sessionTtlMilliseconds: readPositiveNumber(mergedEnvironment.SESSION_TTL_HOURS, 6) * 3600_000,
     drainTimeoutMilliseconds: readPositiveNumber(mergedEnvironment.DRAIN_TIMEOUT_MINUTES, 15) * 60_000,
     heartbeatIntervalMilliseconds: readNonNegativeNumber(mergedEnvironment.HEARTBEAT_INTERVAL_MINUTES, 5) * 60_000,
+    mcpServersFile,
+    // 默认禁用全局 hooks（如 SessionStart 注入）：与 MCP 握手串行等待时会拖慢启动十秒级。
+    disableAllHooks: mergedEnvironment.DISABLE_ALL_HOOKS !== 'false',
     stateDirectory,
     logDirectory,
     hardDeadlineNoticeText: '任务仍在运行（超过企微流式时间限制）',

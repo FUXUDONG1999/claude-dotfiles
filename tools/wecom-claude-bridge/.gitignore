@@ -3,3 +3,4 @@ node_modules/
 logs/
 state/
 *.log
+mcp-servers.json
