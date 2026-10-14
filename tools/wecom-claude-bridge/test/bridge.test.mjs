@@ -141,6 +141,9 @@ test('createBridge 正常任务：流式进度 + finish 收尾；续接开关关
     const finishFrames = finishFramesOf(fixture);
     assert.equal(finishFrames.length, 1);
     assert.ok(finishFrames[0].content.includes('任务完成的结果'));
+    // 成本展示已移除：自备模型后端不按 Claude 计费，耗时后不再跟美元金额。
+    assert.ok(finishFrames[0].content.includes('✅ 耗时 0.5s'));
+    assert.ok(!finishFrames[0].content.includes('$'));
     assert.ok(fixture.sentFrames.some((frame) => frame.content.includes('中间进度')));
 
     assert.equal(fixture.sessionStore.getRecord('single:dong'), null);

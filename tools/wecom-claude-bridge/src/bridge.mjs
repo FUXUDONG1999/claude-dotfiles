@@ -418,9 +418,9 @@ function persistSessionAfterTask(bridgeState, chatIdentifier, { continuationEnab
 function decorateTaskResultText(taskResult) {
   const outcomeMarker = taskResult.success ? '✅' : taskResult.stopped ? '🛑' : taskResult.timedOut ? '⏱️' : '❌';
   const durationSeconds = (taskResult.durationMilliseconds / 1000).toFixed(1);
-  const costText = taskResult.costUsd != null ? ` · $${taskResult.costUsd.toFixed(4)}` : '';
 
-  return `${taskResult.resultText}\n\n---\n${outcomeMarker} 耗时 ${durationSeconds}s${costText}`;
+  // 不展示美元成本：本桥接用自备模型后端，Claude 计费口径无意义。
+  return `${taskResult.resultText}\n\n---\n${outcomeMarker} 耗时 ${durationSeconds}s`;
 }
 
 function formatHours(milliseconds) {
