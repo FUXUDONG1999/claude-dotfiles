@@ -20,6 +20,7 @@
 """
 
 import argparse
+import hashlib
 import html
 import json
 import re
@@ -50,7 +51,7 @@ INDEX_PAGE_TEMPLATE = '''<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>知识课件库</title>
-<link rel="stylesheet" href="assets/courseware.css">
+<link rel="stylesheet" href="assets/courseware.css?v={css_version}">
 </head>
 <body>
 <button id="nav-toggle" class="nav-toggle" aria-label="打开目录" aria-expanded="false">☰</button>
@@ -67,7 +68,7 @@ INDEX_PAGE_TEMPLATE = '''<!DOCTYPE html>
   <iframe id="content-frame" class="docs-frame" title="课件内容"></iframe>
 </div>
 <div id="nav-backdrop" class="nav-backdrop"></div>
-<script src="assets/site.js"></script>
+<script src="assets/site.js?v={js_version}"></script>
 </body>
 </html>
 '''
@@ -272,8 +273,13 @@ def assemble_site(
     shutil.copytree(SHARED_ASSETS_SOURCE, build_root / 'assets')
 
     group_count = len({derive_group_name(catalog_entry['path']) for catalog_entry in catalog_entries})
+    # 资源链接带内容哈希版本号：assets 一变 URL 即变，浏览器与 CDN 都不会拿到新旧混搭的外壳
+    css_version = hashlib.sha256((SHARED_ASSETS_SOURCE / 'courseware.css').read_bytes()).hexdigest()[:8]
+    js_version = hashlib.sha256((SHARED_ASSETS_SOURCE / 'site.js').read_bytes()).hexdigest()[:8]
     index_page = INDEX_PAGE_TEMPLATE.format(
-        group_sections=render_group_sections(catalog_entries, group_descriptions))
+        group_sections=render_group_sections(catalog_entries, group_descriptions),
+        css_version=css_version,
+        js_version=js_version)
     (build_root / 'index.html').write_text(index_page, encoding='utf-8')
     (build_root / 'search-index.json').write_text(
         json.dumps({'pages': catalog_entries, 'groups': group_descriptions}, ensure_ascii=False),
