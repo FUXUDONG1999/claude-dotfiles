@@ -2,3 +2,7 @@
 __pycache__/
 nohup.out
 tools/wecom-claude-bridge/wecom-sandbox/
+
+# ai-mentor 文风改写的临时产物（质检脚本保留）
+.cw-review/*
+!.cw-review/*.py
